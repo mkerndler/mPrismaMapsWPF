@@ -47,7 +47,7 @@ public class ArcRenderer : IEntityRenderer
                 new Size(radius, radius),
                 0,
                 isLargeArc,
-                SweepDirection.Clockwise,
+                SweepDirection.Counterclockwise,
                 true,
                 false);
         }
