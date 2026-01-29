@@ -9,7 +9,11 @@ public interface IDocumentService
     event EventHandler<DocumentLoadedEventArgs>? DocumentLoaded;
     event EventHandler? DocumentClosed;
 
+    Task<IReadOnlyList<(Type EntityType, int Count)>> ScanEntityTypesAsync(
+        string filePath,
+        CancellationToken cancellationToken = default);
     Task<bool> OpenAsync(string filePath, IProgress<int>? progress = null, CancellationToken cancellationToken = default);
+    Task<bool> OpenAsync(string filePath, ISet<Type>? excludedTypes, IProgress<int>? progress = null, CancellationToken cancellationToken = default);
     Task<bool> SaveAsync(string? filePath = null, CancellationToken cancellationToken = default);
     void Close();
     bool HasUnsavedChanges { get; }

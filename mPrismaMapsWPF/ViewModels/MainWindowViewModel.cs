@@ -91,6 +91,7 @@ public partial class MainWindowViewModel : ObservableObject
     public event EventHandler? ZoomToFitRequested;
     public event EventHandler? RenderRequested;
     public event EventHandler? EntitiesChanged;
+    public event EventHandler<SelectEntityTypesEventArgs>? SelectEntityTypesRequested;
 
     [RelayCommand]
     private async Task OpenFileAsync()
@@ -104,11 +105,29 @@ public partial class MainWindowViewModel : ObservableObject
 
         if (dialog.ShowDialog() == true)
         {
-            await LoadFileAsync(dialog.FileName);
+            IsLoading = true;
+            StatusText = "Scanning file...";
+
+            try
+            {
+                var scanResults = await _documentService.ScanEntityTypesAsync(dialog.FileName);
+
+                IsLoading = false;
+
+                // Raise event for view to show dialog
+                SelectEntityTypesRequested?.Invoke(this,
+                    new SelectEntityTypesEventArgs(dialog.FileName, scanResults));
+            }
+            catch (Exception)
+            {
+                IsLoading = false;
+                StatusText = "Failed to scan file";
+                MessageBox.Show($"Failed to scan file: {dialog.FileName}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
     }
 
-    private async Task LoadFileAsync(string filePath)
+    public async Task LoadFileWithFilterAsync(string filePath, ISet<Type>? excludedTypes)
     {
         IsLoading = true;
         StatusText = "Loading...";
@@ -116,7 +135,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         var progress = new Progress<int>(p => LoadProgress = p);
 
-        bool success = await _documentService.OpenAsync(filePath, progress);
+        bool success = await _documentService.OpenAsync(filePath, excludedTypes, progress);
 
         IsLoading = false;
 
@@ -125,6 +144,11 @@ public partial class MainWindowViewModel : ObservableObject
             StatusText = "Failed to load file";
             MessageBox.Show($"Failed to open file: {filePath}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private async Task LoadFileAsync(string filePath)
+    {
+        await LoadFileWithFilterAsync(filePath, null);
     }
 
     [RelayCommand(CanExecute = nameof(CanSave))]

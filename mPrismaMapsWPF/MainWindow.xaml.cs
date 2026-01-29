@@ -27,6 +27,7 @@ public partial class MainWindow : Window
         _viewModel.ZoomToFitRequested += OnZoomToFitRequested;
         _viewModel.RenderRequested += OnRenderRequested;
         _viewModel.EntitiesChanged += OnEntitiesChanged;
+        _viewModel.SelectEntityTypesRequested += OnSelectEntityTypesRequested;
         _viewModel.LayerPanel.LayerVisibilityChanged += OnLayerVisibilityChanged;
         _viewModel.LayerPanel.DeleteLayerRequested += OnDeleteLayerRequested;
         _viewModel.LayerPanel.DeleteMultipleLayersRequested += OnDeleteMultipleLayersRequested;
@@ -262,6 +263,19 @@ public partial class MainWindow : Window
             _viewModel.LayerPanel.ExecuteDeleteMultipleLayers(deletions);
             _viewModel.RefreshEntities();
             UpdateDeleteByTypeMenu();
+        }
+    }
+
+    private async void OnSelectEntityTypesRequested(object? sender, SelectEntityTypesEventArgs e)
+    {
+        var dialog = new SelectEntityTypesDialog(e.ScanResults)
+        {
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            await _viewModel.LoadFileWithFilterAsync(e.FilePath, dialog.ExcludedTypes);
         }
     }
 }

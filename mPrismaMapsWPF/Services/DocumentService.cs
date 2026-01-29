@@ -1,6 +1,7 @@
 using System.IO;
 using ACadSharp;
 using ACadSharp.IO;
+using ACadSharp.Tables;
 using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
 
@@ -15,7 +16,44 @@ public class DocumentService : IDocumentService
 
     public bool HasUnsavedChanges => CurrentDocument.IsDirty;
 
-    public async Task<bool> OpenAsync(string filePath, IProgress<int>? progress = null, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<(Type EntityType, int Count)>> ScanEntityTypesAsync(
+        string filePath,
+        CancellationToken cancellationToken = default)
+    {
+        return await Task.Run(() =>
+        {
+            CadDocument doc = ReadFile(filePath);
+
+            return doc.Entities
+                .GroupBy(e => e.GetType())
+                .Select(g => (g.Key, g.Count()))
+                .OrderBy(x => x.Key.Name)
+                .ToList();
+        }, cancellationToken);
+    }
+
+    private static CadDocument ReadFile(string filePath)
+    {
+        string extension = Path.GetExtension(filePath).ToLowerInvariant();
+
+        if (extension == ".dxf")
+        {
+            using var reader = new DxfReader(filePath);
+            return reader.Read();
+        }
+        else
+        {
+            using var reader = new DwgReader(filePath);
+            return reader.Read();
+        }
+    }
+
+    public Task<bool> OpenAsync(string filePath, IProgress<int>? progress = null, CancellationToken cancellationToken = default)
+    {
+        return OpenAsync(filePath, null, progress, cancellationToken);
+    }
+
+    public async Task<bool> OpenAsync(string filePath, ISet<Type>? excludedTypes, IProgress<int>? progress = null, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -23,18 +61,24 @@ public class DocumentService : IDocumentService
             {
                 progress?.Report(10);
 
-                CadDocument doc;
-                string extension = Path.GetExtension(filePath).ToLowerInvariant();
+                CadDocument doc = ReadFile(filePath);
 
-                if (extension == ".dxf")
+                progress?.Report(50);
+
+                // Filter out excluded entity types
+                if (excludedTypes != null && excludedTypes.Count > 0)
                 {
-                    using var reader = new DxfReader(filePath);
-                    doc = reader.Read();
-                }
-                else
-                {
-                    using var reader = new DwgReader(filePath);
-                    doc = reader.Read();
+                    var entitiesToRemove = doc.Entities
+                        .Where(e => excludedTypes.Contains(e.GetType()))
+                        .ToList();
+
+                    foreach (var entity in entitiesToRemove)
+                    {
+                        if (entity.Owner is BlockRecord owner)
+                        {
+                            owner.Entities.Remove(entity);
+                        }
+                    }
                 }
 
                 progress?.Report(100);
