@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
+using ACadSharp.Entities;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
+using mPrismaMapsWPF.Commands;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Services;
 
@@ -13,18 +15,24 @@ public partial class MainWindowViewModel : ObservableObject
 {
     private readonly IDocumentService _documentService;
     private readonly ISelectionService _selectionService;
+    private readonly IUndoRedoService _undoRedoService;
 
-    public MainWindowViewModel(IDocumentService documentService, ISelectionService selectionService)
+    public MainWindowViewModel(
+        IDocumentService documentService,
+        ISelectionService selectionService,
+        IUndoRedoService undoRedoService)
     {
         _documentService = documentService;
         _selectionService = selectionService;
+        _undoRedoService = undoRedoService;
 
         _documentService.DocumentLoaded += OnDocumentLoaded;
         _documentService.DocumentClosed += OnDocumentClosed;
         _selectionService.SelectionChanged += OnSelectionChanged;
+        _undoRedoService.StateChanged += OnUndoRedoStateChanged;
 
-        LayerPanel = new LayerPanelViewModel(_documentService);
-        PropertiesPanel = new PropertiesPanelViewModel(_selectionService, _documentService);
+        LayerPanel = new LayerPanelViewModel(_documentService, _undoRedoService);
+        PropertiesPanel = new PropertiesPanelViewModel(_selectionService, _documentService, _undoRedoService);
     }
 
     public LayerPanelViewModel LayerPanel { get; }
@@ -63,11 +71,26 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private bool _isSelectMode = true;
 
+    [ObservableProperty]
+    private bool _canUndo;
+
+    [ObservableProperty]
+    private bool _canRedo;
+
+    [ObservableProperty]
+    private string? _undoDescription;
+
+    [ObservableProperty]
+    private string? _redoDescription;
+
     public ObservableCollection<EntityModel> Entities { get; } = new();
     public CadDocumentModel Document => _documentService.CurrentDocument;
 
+    public IUndoRedoService UndoRedoService => _undoRedoService;
+
     public event EventHandler? ZoomToFitRequested;
     public event EventHandler? RenderRequested;
+    public event EventHandler? EntitiesChanged;
 
     [RelayCommand]
     private async Task OpenFileAsync()
@@ -220,6 +243,101 @@ public partial class MainWindowViewModel : ObservableObject
         _selectionService.ClearSelection();
     }
 
+    [RelayCommand(CanExecute = nameof(CanExecuteUndo))]
+    private void Undo()
+    {
+        _undoRedoService.Undo();
+        RefreshAfterEdit();
+    }
+
+    private bool CanExecuteUndo() => _undoRedoService.CanUndo;
+
+    [RelayCommand(CanExecute = nameof(CanExecuteRedo))]
+    private void Redo()
+    {
+        _undoRedoService.Redo();
+        RefreshAfterEdit();
+    }
+
+    private bool CanExecuteRedo() => _undoRedoService.CanRedo;
+
+    [RelayCommand(CanExecute = nameof(CanDeleteSelected))]
+    private void DeleteSelected()
+    {
+        var selectedEntities = _selectionService.SelectedEntities.ToList();
+        if (selectedEntities.Count == 0)
+            return;
+
+        var command = new DeleteEntitiesCommand(_documentService.CurrentDocument, selectedEntities);
+        _undoRedoService.Execute(command);
+
+        // Clear selection and remove from entities collection
+        _selectionService.ClearSelection();
+
+        foreach (var entityModel in selectedEntities)
+        {
+            Entities.Remove(entityModel);
+        }
+
+        RefreshAfterEdit();
+    }
+
+    private bool CanDeleteSelected() => _selectionService.SelectedEntities.Count > 0;
+
+    [RelayCommand(CanExecute = nameof(CanSave))]
+    private void DeleteByType(Type entityType)
+    {
+        if (entityType == null || _documentService.CurrentDocument.Document == null)
+            return;
+
+        var command = new DeleteEntitiesByTypeCommand(_documentService.CurrentDocument, entityType);
+        _undoRedoService.Execute(command);
+
+        // Remove matching entities from collection
+        var entitiesToRemove = Entities.Where(e => e.Entity.GetType() == entityType).ToList();
+        foreach (var entity in entitiesToRemove)
+        {
+            Entities.Remove(entity);
+        }
+
+        _selectionService.ClearSelection();
+        RefreshAfterEdit();
+
+        StatusText = $"Deleted {command.DeletedCount} {entityType.Name} entities";
+    }
+
+    /// <summary>
+    /// Gets the entity types present in the current document for the Delete by Type menu.
+    /// </summary>
+    public IEnumerable<Type> GetEntityTypes()
+    {
+        if (_documentService.CurrentDocument.Document == null)
+            return Enumerable.Empty<Type>();
+
+        return _documentService.CurrentDocument.ModelSpaceEntities
+            .Select(e => e.GetType())
+            .Distinct()
+            .OrderBy(t => t.Name);
+    }
+
+    private void RefreshAfterEdit()
+    {
+        EntityCount = Entities.Count;
+        EntitiesChanged?.Invoke(this, EventArgs.Empty);
+        RenderRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnUndoRedoStateChanged(object? sender, EventArgs e)
+    {
+        CanUndo = _undoRedoService.CanUndo;
+        CanRedo = _undoRedoService.CanRedo;
+        UndoDescription = _undoRedoService.UndoDescription;
+        RedoDescription = _undoRedoService.RedoDescription;
+
+        UndoCommand.NotifyCanExecuteChanged();
+        RedoCommand.NotifyCanExecuteChanged();
+    }
+
     public void UpdateMousePosition(double x, double y)
     {
         MouseX = x;
@@ -261,5 +379,20 @@ public partial class MainWindowViewModel : ObservableObject
     private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         SelectedCount = e.SelectedEntities.Count;
+        DeleteSelectedCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Refreshes the entity collection from the document. Called after undo/redo operations.
+    /// </summary>
+    public void RefreshEntities()
+    {
+        Entities.Clear();
+        foreach (var entity in _documentService.CurrentDocument.ModelSpaceEntities)
+        {
+            Entities.Add(new EntityModel(entity));
+        }
+        EntityCount = Entities.Count;
+        RenderRequested?.Invoke(this, EventArgs.Empty);
     }
 }

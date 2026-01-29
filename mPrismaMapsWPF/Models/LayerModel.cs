@@ -23,6 +23,9 @@ public partial class LayerModel : ObservableObject
     [ObservableProperty]
     private bool _isFrozen;
 
+    [ObservableProperty]
+    private bool _isSelected;
+
     public System.Windows.Media.Color Color => AciToColor(_layer.Color.Index);
 
     private static System.Windows.Media.Color AciToColor(short aciIndex)

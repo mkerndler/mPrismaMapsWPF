@@ -1,0 +1,105 @@
+<Window x:Class="mPrismaMapsWPF.Views.DeleteMultipleLayersDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Delete Multiple Layers"
+        Height="350" Width="450"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#FF1E1E1E">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <TextBlock Grid.Row="0"
+                   Text="Delete Multiple Layers"
+                   FontSize="18"
+                   FontWeight="SemiBold"
+                   Foreground="White"
+                   Margin="0,0,0,16"/>
+
+        <!-- Warning message -->
+        <TextBlock Grid.Row="1"
+                   x:Name="MessageText"
+                   TextWrapping="Wrap"
+                   Foreground="#FFCCCCCC"
+                   Margin="0,0,0,12"/>
+
+        <!-- Layers to delete list -->
+        <TextBlock Grid.Row="2"
+                   Text="Layers to delete:"
+                   Foreground="#FFAAAAAA"
+                   Margin="0,0,0,4"/>
+
+        <ListBox Grid.Row="3"
+                 x:Name="LayersListBox"
+                 Height="100"
+                 Background="#FF2D2D2D"
+                 Foreground="White"
+                 BorderBrush="#FF555555"
+                 Margin="0,0,0,12">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Layer.Name}" Width="150"/>
+                        <TextBlock Text="{Binding EntityCount, StringFormat='({0} entities)'}" Foreground="#FF888888"/>
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- Options -->
+        <StackPanel Grid.Row="4" Margin="0,0,0,16">
+            <RadioButton x:Name="DeleteEntitiesRadio"
+                         Content="Delete all entities on these layers"
+                         Foreground="White"
+                         GroupName="DeleteOption"
+                         IsChecked="True"
+                         Margin="0,0,0,8"/>
+
+            <StackPanel>
+                <RadioButton x:Name="ReassignEntitiesRadio"
+                             Content="Reassign all entities to:"
+                             Foreground="White"
+                             GroupName="DeleteOption"
+                             Margin="0,0,0,8"/>
+
+                <ComboBox x:Name="TargetLayerCombo"
+                          Margin="24,0,0,0"
+                          IsEnabled="{Binding ElementName=ReassignEntitiesRadio, Path=IsChecked}"
+                          Width="200"
+                          HorizontalAlignment="Left"/>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="5"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button x:Name="DeleteButton"
+                    Content="Delete All"
+                    Width="90"
+                    Height="28"
+                    Margin="0,0,8,0"
+                    Background="#FF8B0000"
+                    Foreground="White"
+                    BorderThickness="0"
+                    Click="DeleteButton_Click"/>
+            <Button x:Name="CancelButton"
+                    Content="Cancel"
+                    Width="80"
+                    Height="28"
+                    Background="#FF3C3C3C"
+                    Foreground="White"
+                    BorderBrush="#FF555555"
+                    Click="CancelButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

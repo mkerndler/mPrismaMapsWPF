@@ -92,7 +92,11 @@
     <Window.InputBindings>
         <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
         <KeyBinding Key="S" Modifiers="Ctrl" Command="{Binding SaveFileCommand}"/>
+        <KeyBinding Key="Z" Modifiers="Ctrl" Command="{Binding UndoCommand}"/>
+        <KeyBinding Key="Y" Modifiers="Ctrl" Command="{Binding RedoCommand}"/>
+        <KeyBinding Key="Z" Modifiers="Ctrl+Shift" Command="{Binding RedoCommand}"/>
         <KeyBinding Key="A" Modifiers="Ctrl" Command="{Binding SelectAllCommand}"/>
+        <KeyBinding Key="Delete" Command="{Binding DeleteSelectedCommand}"/>
         <KeyBinding Key="Escape" Command="{Binding ClearSelectionCommand}"/>
         <KeyBinding Key="Add" Command="{Binding ZoomInCommand}"/>
         <KeyBinding Key="Subtract" Command="{Binding ZoomOutCommand}"/>
@@ -126,8 +130,28 @@
                 <MenuItem Header="E_xit" Command="{Binding ExitCommand}"/>
             </MenuItem>
             <MenuItem Header="_Edit">
+                <MenuItem Header="_Undo" Command="{Binding UndoCommand}" InputGestureText="Ctrl+Z">
+                    <MenuItem.Icon>
+                        <TextBlock Text="&#x21B6;" FontSize="12"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="_Redo" Command="{Binding RedoCommand}" InputGestureText="Ctrl+Y">
+                    <MenuItem.Icon>
+                        <TextBlock Text="&#x21B7;" FontSize="12"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <Separator/>
                 <MenuItem Header="Select _All" Command="{Binding SelectAllCommand}" InputGestureText="Ctrl+A"/>
                 <MenuItem Header="_Clear Selection" Command="{Binding ClearSelectionCommand}" InputGestureText="Esc"/>
+                <Separator/>
+                <MenuItem Header="_Delete Selected" Command="{Binding DeleteSelectedCommand}" InputGestureText="Del">
+                    <MenuItem.Icon>
+                        <TextBlock Text="&#x2716;" FontSize="12"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="Delete by _Type" x:Name="DeleteByTypeMenu">
+                    <!-- Populated dynamically in code-behind -->
+                </MenuItem>
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="Zoom _In" Command="{Binding ZoomInCommand}" InputGestureText="+"/>
@@ -148,6 +172,17 @@
                         Command="{Binding SaveFileCommand}"
                         ToolTip="Save File (Ctrl+S)">
                     <TextBlock Text="&#x1F4BE;" FontSize="16"/>
+                </Button>
+                <Separator Margin="8,4"/>
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding UndoCommand}"
+                        ToolTip="{Binding UndoDescription, StringFormat='Undo: {0} (Ctrl+Z)', FallbackValue='Undo (Ctrl+Z)'}">
+                    <TextBlock Text="&#x21B6;" FontSize="16"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding RedoCommand}"
+                        ToolTip="{Binding RedoDescription, StringFormat='Redo: {0} (Ctrl+Y)', FallbackValue='Redo (Ctrl+Y)'}">
+                    <TextBlock Text="&#x21B7;" FontSize="16"/>
                 </Button>
                 <Separator Margin="8,4"/>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
@@ -252,19 +287,87 @@
                                    FontSize="11"
                                    Margin="8,0,8,8"/>
 
-                        <ListView Grid.Row="2"
-                                  ItemsSource="{Binding PropertiesPanel.Properties}"
-                                  Background="Transparent"
-                                  Foreground="White"
-                                  BorderThickness="0"
-                                  Margin="4">
-                            <ListView.View>
-                                <GridView>
-                                    <GridViewColumn Header="Property" Width="90" DisplayMemberBinding="{Binding Name}"/>
-                                    <GridViewColumn Header="Value" Width="100" DisplayMemberBinding="{Binding Value}"/>
-                                </GridView>
-                            </ListView.View>
-                        </ListView>
+                        <!-- Editable Properties -->
+                        <Grid Grid.Row="2" Margin="8,0,8,8"
+                              Visibility="{Binding PropertiesPanel.HasSelection, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Layer Edit -->
+                            <Grid Grid.Row="0" Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="50"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Layer:" Foreground="#FFCCCCCC" VerticalAlignment="Center"/>
+                                <ComboBox Grid.Column="1"
+                                          ItemsSource="{Binding PropertiesPanel.AvailableLayers}"
+                                          SelectedItem="{Binding PropertiesPanel.SelectedLayer}"
+                                          Margin="4,0"/>
+                                <Button Grid.Column="2"
+                                        Content="Apply"
+                                        Command="{Binding PropertiesPanel.ApplyLayerChangeCommand}"
+                                        Padding="8,2"
+                                        Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"/>
+                            </Grid>
+
+                            <!-- Color Edit -->
+                            <Grid Grid.Row="1" Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="50"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Color:" Foreground="#FFCCCCCC" VerticalAlignment="Center"/>
+                                <ComboBox Grid.Column="1"
+                                          ItemsSource="{Binding PropertiesPanel.AvailableColors}"
+                                          SelectedItem="{Binding PropertiesPanel.SelectedColorItem}"
+                                          Margin="4,0">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Rectangle Width="14" Height="14"
+                                                           Fill="{Binding WpfColor, Converter={StaticResource ColorToBrushConverter}}"
+                                                           Margin="0,0,6,0"
+                                                           Stroke="Gray" StrokeThickness="0.5"/>
+                                                <TextBlock Text="{Binding Name}"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <Button Grid.Column="2"
+                                        Content="Apply"
+                                        Command="{Binding PropertiesPanel.ApplyColorChangeCommand}"
+                                        Padding="8,2"
+                                        Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"/>
+                            </Grid>
+
+                            <!-- Property List -->
+                            <ListView Grid.Row="2"
+                                      ItemsSource="{Binding PropertiesPanel.Properties}"
+                                      Background="Transparent"
+                                      Foreground="White"
+                                      BorderThickness="0">
+                                <ListView.View>
+                                    <GridView>
+                                        <GridViewColumn Header="Property" Width="80" DisplayMemberBinding="{Binding Name}"/>
+                                        <GridViewColumn Header="Value" Width="90" DisplayMemberBinding="{Binding Value}"/>
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                        </Grid>
+
+                        <!-- No Selection Message -->
+                        <TextBlock Grid.Row="2"
+                                   Text="Select an entity to view properties"
+                                   Foreground="#FF666666"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   Visibility="{Binding PropertiesPanel.HasSelection, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}"/>
                     </Grid>
 
                     <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" VerticalAlignment="Center"
@@ -275,25 +378,56 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Text="Layers" Style="{StaticResource PanelHeaderStyle}"/>
 
-                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="8,0,8,4">
+                        <!-- Layer buttons -->
+                        <WrapPanel Grid.Row="1" Margin="8,0,8,4">
                             <Button Content="All On"
                                     Command="{Binding LayerPanel.ShowAllLayersCommand}"
-                                    Padding="8,2" Margin="0,0,4,0"
-                                    Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"/>
+                                    Padding="6,2" Margin="0,0,2,2"
+                                    Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                                    ToolTip="Show all layers"/>
                             <Button Content="All Off"
                                     Command="{Binding LayerPanel.HideAllLayersCommand}"
-                                    Padding="8,2" Margin="0,0,4,0"
-                                    Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"/>
-                        </StackPanel>
+                                    Padding="6,2" Margin="0,0,2,2"
+                                    Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                                    ToolTip="Hide all layers"/>
+                            <Button Content="Toggle"
+                                    Command="{Binding LayerPanel.ToggleSelectedLayersVisibilityCommand}"
+                                    Padding="6,2" Margin="0,0,2,2"
+                                    Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                                    ToolTip="Toggle visibility of selected layers"/>
+                            <Button Content="Isolate"
+                                    Command="{Binding LayerPanel.IsolateSelectedLayersCommand}"
+                                    Padding="6,2" Margin="0,0,2,2"
+                                    Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                                    ToolTip="Show only selected layers"/>
+                            <Button Content="Delete"
+                                    Command="{Binding LayerPanel.DeleteSelectedLayersCommand}"
+                                    Padding="6,2" Margin="0,0,2,2"
+                                    Background="#FF8B0000" Foreground="White" BorderBrush="#FF555555"
+                                    ToolTip="Delete selected layers"/>
+                        </WrapPanel>
 
-                        <ListBox Grid.Row="2"
+                        <!-- Selection info -->
+                        <TextBlock Grid.Row="2"
+                                   Margin="8,0,8,2"
+                                   FontSize="10"
+                                   Foreground="#FF888888">
+                            <Run Text="{Binding LayerPanel.SelectedLayerCount, Mode=OneWay}"/>
+                            <Run Text=" layer(s) selected"/>
+                        </TextBlock>
+
+                        <ListBox Grid.Row="3"
+                                 x:Name="LayersListBox"
                                  ItemsSource="{Binding LayerPanel.Layers}"
                                  SelectedItem="{Binding LayerPanel.SelectedLayer}"
+                                 SelectionMode="Extended"
+                                 SelectionChanged="LayersListBox_SelectionChanged"
                                  Background="Transparent"
                                  Foreground="White"
                                  BorderThickness="0"

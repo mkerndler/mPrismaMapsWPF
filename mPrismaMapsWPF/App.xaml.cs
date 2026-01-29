@@ -18,11 +18,15 @@ public partial class App : Application
 
     private static void ConfigureServices(IServiceCollection services)
     {
+        // Core services
         services.AddSingleton<IDocumentService, DocumentService>();
         services.AddSingleton<ISelectionService, SelectionService>();
+        services.AddSingleton<IUndoRedoService, UndoRedoService>();
 
+        // ViewModels
         services.AddSingleton<MainWindowViewModel>();
 
+        // Windows
         services.AddSingleton<MainWindow>();
     }
 

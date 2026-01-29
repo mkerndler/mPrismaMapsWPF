@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
+using ACadSharp;
 using ACadSharp.Entities;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using mPrismaMapsWPF.Commands;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Services;
 
@@ -11,12 +13,23 @@ public partial class PropertiesPanelViewModel : ObservableObject
 {
     private readonly ISelectionService _selectionService;
     private readonly IDocumentService _documentService;
+    private readonly IUndoRedoService _undoRedoService;
 
-    public PropertiesPanelViewModel(ISelectionService selectionService, IDocumentService documentService)
+    public PropertiesPanelViewModel(
+        ISelectionService selectionService,
+        IDocumentService documentService,
+        IUndoRedoService undoRedoService)
     {
         _selectionService = selectionService;
         _documentService = documentService;
+        _undoRedoService = undoRedoService;
         _selectionService.SelectionChanged += OnSelectionChanged;
+
+        // Initialize color items
+        foreach (var colorItem in ColorItem.StandardColors)
+        {
+            AvailableColors.Add(colorItem);
+        }
     }
 
     public ObservableCollection<PropertyItem> Properties { get; } = new();
@@ -33,7 +46,13 @@ public partial class PropertiesPanelViewModel : ObservableObject
     [ObservableProperty]
     private string? _selectedColor;
 
+    [ObservableProperty]
+    private ColorItem? _selectedColorItem;
+
     public ObservableCollection<string> AvailableLayers { get; } = new();
+    public ObservableCollection<ColorItem> AvailableColors { get; } = new();
+
+    public event EventHandler? PropertiesUpdated;
 
     [RelayCommand]
     private void ApplyLayerChange()
@@ -47,13 +66,30 @@ public partial class PropertiesPanelViewModel : ObservableObject
         if (targetLayer == null)
             return;
 
-        foreach (var entityModel in _selectionService.SelectedEntities)
-        {
-            entityModel.Entity.Layer = targetLayer;
-        }
+        var command = new ChangeEntityLayerCommand(
+            _documentService.CurrentDocument,
+            _selectionService.SelectedEntities,
+            targetLayer);
 
-        _documentService.CurrentDocument.IsDirty = true;
+        _undoRedoService.Execute(command);
         RefreshProperties();
+        PropertiesUpdated?.Invoke(this, EventArgs.Empty);
+    }
+
+    [RelayCommand]
+    private void ApplyColorChange()
+    {
+        if (SelectedColorItem == null || !HasSelection)
+            return;
+
+        var command = new ChangeEntityColorCommand(
+            _documentService.CurrentDocument,
+            _selectionService.SelectedEntities,
+            SelectedColorItem.AcadColor);
+
+        _undoRedoService.Execute(command);
+        RefreshProperties();
+        PropertiesUpdated?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -79,6 +115,7 @@ public partial class PropertiesPanelViewModel : ObservableObject
             SelectionSummary = "No selection";
             SelectedLayer = null;
             SelectedColor = null;
+            SelectedColorItem = null;
             return;
         }
 
@@ -88,6 +125,21 @@ public partial class PropertiesPanelViewModel : ObservableObject
             SelectionSummary = entity.DisplayName;
             SelectedLayer = entity.LayerName;
             SelectedColor = entity.GetProperty("Color");
+
+            // Set color item for single selection
+            var color = entity.Entity.Color;
+            if (color.IsByLayer)
+            {
+                SelectedColorItem = AvailableColors.FirstOrDefault(c => c.IsByLayer);
+            }
+            else if (color.IsByBlock)
+            {
+                SelectedColorItem = AvailableColors.FirstOrDefault(c => c.IsByBlock);
+            }
+            else
+            {
+                SelectedColorItem = AvailableColors.FirstOrDefault(c => c.AciIndex == color.Index);
+            }
 
             AddCommonProperties(entity);
             AddEntitySpecificProperties(entity);
@@ -101,6 +153,29 @@ public partial class PropertiesPanelViewModel : ObservableObject
 
             var colors = selected.Select(e => e.GetProperty("Color")).Distinct().ToList();
             SelectedColor = colors.Count == 1 ? colors[0] : "(varies)";
+
+            // For multiple selection, only set color item if all have same color
+            if (colors.Count == 1)
+            {
+                var firstEntity = selected.First().Entity;
+                var color = firstEntity.Color;
+                if (color.IsByLayer)
+                {
+                    SelectedColorItem = AvailableColors.FirstOrDefault(c => c.IsByLayer);
+                }
+                else if (color.IsByBlock)
+                {
+                    SelectedColorItem = AvailableColors.FirstOrDefault(c => c.IsByBlock);
+                }
+                else
+                {
+                    SelectedColorItem = AvailableColors.FirstOrDefault(c => c.AciIndex == color.Index);
+                }
+            }
+            else
+            {
+                SelectedColorItem = null;
+            }
 
             Properties.Add(new PropertyItem("Count", selected.Count.ToString()));
             Properties.Add(new PropertyItem("Types", string.Join(", ", selected.Select(e => e.TypeName).Distinct())));

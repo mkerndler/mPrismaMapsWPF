@@ -1,0 +1,82 @@
+<Window x:Class="mPrismaMapsWPF.Views.DeleteLayerDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Delete Layer"
+        Height="280" Width="400"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#FF1E1E1E">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <TextBlock Grid.Row="0"
+                   Text="Delete Layer"
+                   FontSize="18"
+                   FontWeight="SemiBold"
+                   Foreground="White"
+                   Margin="0,0,0,16"/>
+
+        <!-- Warning message -->
+        <TextBlock Grid.Row="1"
+                   x:Name="MessageText"
+                   TextWrapping="Wrap"
+                   Foreground="#FFCCCCCC"
+                   Margin="0,0,0,16"/>
+
+        <!-- Delete entities option -->
+        <RadioButton Grid.Row="2"
+                     x:Name="DeleteEntitiesRadio"
+                     Content="Delete all entities on this layer"
+                     Foreground="White"
+                     GroupName="DeleteOption"
+                     IsChecked="True"
+                     Margin="0,0,0,8"/>
+
+        <!-- Reassign entities option -->
+        <StackPanel Grid.Row="3" Margin="0,0,0,8">
+            <RadioButton x:Name="ReassignEntitiesRadio"
+                         Content="Reassign entities to another layer:"
+                         Foreground="White"
+                         GroupName="DeleteOption"
+                         Margin="0,0,0,8"/>
+
+            <ComboBox x:Name="TargetLayerCombo"
+                      Margin="24,0,0,0"
+                      IsEnabled="{Binding ElementName=ReassignEntitiesRadio, Path=IsChecked}"
+                      Width="200"
+                      HorizontalAlignment="Left"/>
+        </StackPanel>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="5"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button x:Name="DeleteButton"
+                    Content="Delete"
+                    Width="80"
+                    Height="28"
+                    Margin="0,0,8,0"
+                    Background="#FF0078D4"
+                    Foreground="White"
+                    BorderThickness="0"
+                    Click="DeleteButton_Click"/>
+            <Button x:Name="CancelButton"
+                    Content="Cancel"
+                    Width="80"
+                    Height="28"
+                    Background="#FF3C3C3C"
+                    Foreground="White"
+                    BorderBrush="#FF555555"
+                    Click="CancelButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
