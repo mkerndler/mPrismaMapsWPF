@@ -14,7 +14,7 @@ public class ArcRenderer : IEntityRenderer
         if (entity is not Arc arc)
             return;
 
-        var pen = CreatePen(arc, renderContext);
+        var pen = GetPen(arc, renderContext);
         var geometry = CreateArcGeometry(arc, renderContext);
 
         context.DrawGeometry(null, pen, geometry);
@@ -56,7 +56,7 @@ public class ArcRenderer : IEntityRenderer
         return geometry;
     }
 
-    private static Pen CreatePen(Arc arc, RenderContext renderContext)
+    private static Pen GetPen(Arc arc, RenderContext renderContext)
     {
         Color color;
         double thickness = renderContext.LineThickness;
@@ -71,8 +71,6 @@ public class ArcRenderer : IEntityRenderer
             color = ColorHelper.GetEntityColor(arc, renderContext.DefaultColor);
         }
 
-        var pen = new Pen(new SolidColorBrush(color), thickness);
-        pen.Freeze();
-        return pen;
+        return RenderCache.GetPen(color, thickness);
     }
 }

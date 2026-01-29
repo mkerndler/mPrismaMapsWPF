@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
 using ACadSharp.Entities;
@@ -8,8 +7,6 @@ namespace mPrismaMapsWPF.Rendering.EntityRenderers;
 
 public class TextRenderer : IEntityRenderer
 {
-    private static readonly Typeface DefaultTypeface = new("Arial");
-
     public bool CanRender(Entity entity) => entity is TextEntity or MText;
 
     public void Render(DrawingContext context, Entity entity, RenderContext renderContext)
@@ -46,17 +43,11 @@ public class TextRenderer : IEntityRenderer
             color = ColorHelper.GetEntityColor(text, renderContext.DefaultColor);
         }
 
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
-
-        var formattedText = new FormattedText(
+        var formattedText = RenderCache.GetFormattedText(
+            text.Handle,
             text.Value,
-            CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
-            DefaultTypeface,
             fontSize,
-            brush,
-            1.0);
+            color);
 
         context.PushTransform(new ScaleTransform(1, -1, position.X, position.Y));
 
@@ -97,24 +88,15 @@ public class TextRenderer : IEntityRenderer
             color = ColorHelper.GetEntityColor(mtext, renderContext.DefaultColor);
         }
 
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
-
         string cleanText = StripMTextFormatting(mtext.Value);
+        double maxWidth = mtext.RectangleWidth > 0 ? renderContext.TransformDistance(mtext.RectangleWidth) : 0;
 
-        var formattedText = new FormattedText(
+        var formattedText = RenderCache.GetFormattedText(
+            mtext.Handle,
             cleanText,
-            CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
-            DefaultTypeface,
             fontSize,
-            brush,
-            1.0);
-
-        if (mtext.RectangleWidth > 0)
-        {
-            formattedText.MaxTextWidth = renderContext.TransformDistance(mtext.RectangleWidth);
-        }
+            color,
+            maxWidth);
 
         context.PushTransform(new ScaleTransform(1, -1, position.X, position.Y));
 

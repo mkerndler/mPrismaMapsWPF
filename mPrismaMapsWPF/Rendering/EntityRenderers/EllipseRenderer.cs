@@ -13,7 +13,7 @@ public class EllipseRenderer : IEntityRenderer
         if (entity is not Ellipse ellipse)
             return;
 
-        var pen = CreatePen(ellipse, renderContext);
+        var pen = GetPen(ellipse, renderContext);
 
         var center = renderContext.Transform(ellipse.Center.X, ellipse.Center.Y);
 
@@ -32,7 +32,7 @@ public class EllipseRenderer : IEntityRenderer
         context.Pop();
     }
 
-    private static Pen CreatePen(Ellipse ellipse, RenderContext renderContext)
+    private static Pen GetPen(Ellipse ellipse, RenderContext renderContext)
     {
         Color color;
         double thickness = renderContext.LineThickness;
@@ -47,8 +47,6 @@ public class EllipseRenderer : IEntityRenderer
             color = ColorHelper.GetEntityColor(ellipse, renderContext.DefaultColor);
         }
 
-        var pen = new Pen(new SolidColorBrush(color), thickness);
-        pen.Freeze();
-        return pen;
+        return RenderCache.GetPen(color, thickness);
     }
 }

@@ -175,7 +175,8 @@ public class CadCanvas : FrameworkElement
             Offset = _offset,
             DefaultColor = Colors.White,
             LineThickness = 1.0,
-            ShowSelection = true
+            ShowSelection = true,
+            ViewportBounds = CalculateViewportBounds()
         };
 
         if (SelectedHandles != null)
@@ -195,6 +196,20 @@ public class CadCanvas : FrameworkElement
         }
 
         _renderService.RenderEntities(dc, entities, renderContext);
+    }
+
+    private Rect CalculateViewportBounds()
+    {
+        // Convert screen corners to CAD coordinates
+        var topLeft = ScreenToCad(new WpfPoint(0, 0));
+        var bottomRight = ScreenToCad(new WpfPoint(ActualWidth, ActualHeight));
+
+        double minX = Math.Min(topLeft.X, bottomRight.X);
+        double maxX = Math.Max(topLeft.X, bottomRight.X);
+        double minY = Math.Min(topLeft.Y, bottomRight.Y);
+        double maxY = Math.Max(topLeft.Y, bottomRight.Y);
+
+        return new Rect(minX, minY, maxX - minX, maxY - minY);
     }
 
     protected override int VisualChildrenCount => _visuals.Count;

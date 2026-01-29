@@ -1,6 +1,7 @@
 using System.IO;
 using ACadSharp;
 using ACadSharp.IO;
+using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
 
 namespace mPrismaMapsWPF.Services;
@@ -96,6 +97,7 @@ public class DocumentService : IDocumentService
     public void Close()
     {
         CurrentDocument.Clear();
+        RenderCache.Clear();
         DocumentClosed?.Invoke(this, EventArgs.Empty);
     }
 }

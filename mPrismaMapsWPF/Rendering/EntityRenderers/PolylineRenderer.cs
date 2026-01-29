@@ -28,7 +28,7 @@ public class PolylineRenderer : IEntityRenderer
         if (vertices.Count < 2)
             return;
 
-        var pen = CreatePen(polyline, renderContext);
+        var pen = GetPen(polyline, renderContext);
         var geometry = new StreamGeometry();
 
         using (var ctx = geometry.Open())
@@ -88,7 +88,7 @@ public class PolylineRenderer : IEntityRenderer
         if (vertices.Count < 2)
             return;
 
-        var pen = CreatePen(polyline, renderContext);
+        var pen = GetPen(polyline, renderContext);
         var geometry = new StreamGeometry();
 
         using (var ctx = geometry.Open())
@@ -107,7 +107,7 @@ public class PolylineRenderer : IEntityRenderer
         context.DrawGeometry(null, pen, geometry);
     }
 
-    private static Pen CreatePen(Entity entity, RenderContext renderContext)
+    private static Pen GetPen(Entity entity, RenderContext renderContext)
     {
         Color color;
         double thickness = renderContext.LineThickness;
@@ -122,8 +122,6 @@ public class PolylineRenderer : IEntityRenderer
             color = ColorHelper.GetEntityColor(entity, renderContext.DefaultColor);
         }
 
-        var pen = new Pen(new SolidColorBrush(color), thickness);
-        pen.Freeze();
-        return pen;
+        return RenderCache.GetPen(color, thickness);
     }
 }

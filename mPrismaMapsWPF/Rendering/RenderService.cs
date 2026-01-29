@@ -1,5 +1,6 @@
 using System.Windows.Media;
 using ACadSharp.Entities;
+using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Rendering.EntityRenderers;
 
 namespace mPrismaMapsWPF.Rendering;
@@ -29,6 +30,14 @@ public class RenderService
         {
             if (!renderContext.IsLayerVisible(entity))
                 continue;
+
+            // Viewport culling - skip entities outside visible area
+            if (renderContext.ViewportBounds.HasValue)
+            {
+                var bounds = BoundingBoxHelper.GetBounds(entity);
+                if (bounds.HasValue && !renderContext.IsInViewport(bounds.Value))
+                    continue;
+            }
 
             RenderEntity(context, entity, renderContext);
         }

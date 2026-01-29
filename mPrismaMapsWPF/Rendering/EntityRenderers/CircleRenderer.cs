@@ -16,11 +16,11 @@ public class CircleRenderer : IEntityRenderer
         var center = renderContext.Transform(circle.Center.X, circle.Center.Y);
         double radius = renderContext.TransformDistance(circle.Radius);
 
-        var pen = CreatePen(circle, renderContext);
+        var pen = GetPen(circle, renderContext);
         context.DrawEllipse(null, pen, center, radius, radius);
     }
 
-    private static Pen CreatePen(Circle circle, RenderContext renderContext)
+    private static Pen GetPen(Circle circle, RenderContext renderContext)
     {
         Color color;
         double thickness = renderContext.LineThickness;
@@ -35,8 +35,6 @@ public class CircleRenderer : IEntityRenderer
             color = ColorHelper.GetEntityColor(circle, renderContext.DefaultColor);
         }
 
-        var pen = new Pen(new SolidColorBrush(color), thickness);
-        pen.Freeze();
-        return pen;
+        return RenderCache.GetPen(color, thickness);
     }
 }

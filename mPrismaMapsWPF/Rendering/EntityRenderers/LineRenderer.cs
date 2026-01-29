@@ -16,11 +16,11 @@ public class LineRenderer : IEntityRenderer
         var start = renderContext.Transform(line.StartPoint.X, line.StartPoint.Y);
         var end = renderContext.Transform(line.EndPoint.X, line.EndPoint.Y);
 
-        var pen = CreatePen(line, renderContext);
+        var pen = GetPen(line, renderContext);
         context.DrawLine(pen, start, end);
     }
 
-    private static Pen CreatePen(Line line, RenderContext renderContext)
+    private static Pen GetPen(Line line, RenderContext renderContext)
     {
         Color color;
         double thickness = renderContext.LineThickness;
@@ -35,8 +35,6 @@ public class LineRenderer : IEntityRenderer
             color = ColorHelper.GetEntityColor(line, renderContext.DefaultColor);
         }
 
-        var pen = new Pen(new SolidColorBrush(color), thickness);
-        pen.Freeze();
-        return pen;
+        return RenderCache.GetPen(color, thickness);
     }
 }

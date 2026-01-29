@@ -1,6 +1,5 @@
 using System.Windows.Media;
 using ACadSharp.Entities;
-using mPrismaMapsWPF.Helpers;
 
 namespace mPrismaMapsWPF.Rendering.EntityRenderers;
 

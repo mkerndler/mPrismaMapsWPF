@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Media;
 using ACadSharp.Entities;
 using WpfPoint = System.Windows.Point;
@@ -19,6 +20,7 @@ public class RenderContext
     public bool ShowSelection { get; set; } = true;
     public HashSet<ulong> SelectedHandles { get; } = new();
     public HashSet<string> HiddenLayers { get; } = new();
+    public Rect? ViewportBounds { get; set; }
 
     public WpfPoint Transform(double x, double y)
     {
@@ -44,5 +46,15 @@ public class RenderContext
     public bool IsSelected(Entity entity)
     {
         return SelectedHandles.Contains(entity.Handle);
+    }
+
+    public bool IsInViewport(Rect entityBounds)
+    {
+        if (!ViewportBounds.HasValue)
+            return true;
+
+        return ViewportBounds.Value.IntersectsWith(entityBounds) ||
+               ViewportBounds.Value.Contains(entityBounds) ||
+               entityBounds.Contains(ViewportBounds.Value);
     }
 }

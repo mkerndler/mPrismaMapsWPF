@@ -28,13 +28,10 @@ public class PointRenderer : IEntityRenderer
             color = ColorHelper.GetEntityColor(point, renderContext.DefaultColor);
         }
 
-        var brush = new SolidColorBrush(color);
-        brush.Freeze();
+        var brush = RenderCache.GetBrush(color);
+        var pen = RenderCache.GetPen(color, 1);
 
         context.DrawEllipse(brush, null, center, PointSize / 2, PointSize / 2);
-
-        var pen = new Pen(brush, 1);
-        pen.Freeze();
 
         context.DrawLine(pen,
             new System.Windows.Point(center.X - PointSize, center.Y),
