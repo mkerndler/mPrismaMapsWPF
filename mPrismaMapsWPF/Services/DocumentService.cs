@@ -24,7 +24,10 @@ public class DocumentService : IDocumentService
         {
             CadDocument doc = ReadFile(filePath);
 
+            // Use PLINQ for parallel grouping on large entity sets
             return doc.Entities
+                .AsParallel()
+                .WithCancellation(cancellationToken)
                 .GroupBy(e => e.GetType())
                 .Select(g => (g.Key, g.Count()))
                 .OrderBy(x => x.Key.Name)
@@ -65,10 +68,12 @@ public class DocumentService : IDocumentService
 
                 progress?.Report(50);
 
-                // Filter out excluded entity types
+                // Filter out excluded entity types using PLINQ for parallel filtering
                 if (excludedTypes != null && excludedTypes.Count > 0)
                 {
                     var entitiesToRemove = doc.Entities
+                        .AsParallel()
+                        .WithCancellation(cancellationToken)
                         .Where(e => excludedTypes.Contains(e.GetType()))
                         .ToList();
 

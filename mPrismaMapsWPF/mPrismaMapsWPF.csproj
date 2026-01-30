@@ -7,6 +7,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon></ApplicationIcon>
+
+    <!-- Performance optimizations -->
+    <!-- ReadyToRun: Pre-compile IL to native code for faster startup -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- Server GC: Better throughput for multi-core systems with large documents -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <!-- Concurrent GC: Reduce pause times during garbage collection -->
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <!-- Tiered compilation for better steady-state performance -->
+    <TieredCompilation>true</TieredCompilation>
   </PropertyGroup>
 
   <ItemGroup>

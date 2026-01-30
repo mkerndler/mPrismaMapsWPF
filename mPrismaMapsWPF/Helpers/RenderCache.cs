@@ -10,6 +10,8 @@ public static class RenderCache
     private static readonly ConcurrentDictionary<(Color color, double thickness), Pen> _penCache = new();
     private static readonly ConcurrentDictionary<Color, SolidColorBrush> _brushCache = new();
     private static readonly ConcurrentDictionary<FormattedTextKey, FormattedText> _textCache = new();
+    private static readonly ConcurrentDictionary<double, RotateTransform> _rotateTransformCache = new();
+    private static readonly ConcurrentDictionary<(double x, double y), ScaleTransform> _scaleTransformCache = new();
 
     private static readonly Typeface DefaultTypeface = new("Arial");
 
@@ -65,11 +67,45 @@ public static class RenderCache
         });
     }
 
+    /// <summary>
+    /// Gets a frozen RotateTransform for the specified angle (in degrees).
+    /// Note: These transforms have no center point - use for simple rotations only.
+    /// </summary>
+    public static RotateTransform GetRotateTransform(double angleDegrees)
+    {
+        // Round to reduce cache entries for nearly identical angles
+        double roundedAngle = Math.Round(angleDegrees, 2);
+        return _rotateTransformCache.GetOrAdd(roundedAngle, angle =>
+        {
+            var transform = new RotateTransform(angle);
+            transform.Freeze();
+            return transform;
+        });
+    }
+
+    /// <summary>
+    /// Gets a frozen ScaleTransform for the specified scale factors.
+    /// Note: These transforms have no center point - use for simple scales only.
+    /// </summary>
+    public static ScaleTransform GetScaleTransform(double scaleX, double scaleY)
+    {
+        // Round to reduce cache entries
+        var key = (Math.Round(scaleX, 4), Math.Round(scaleY, 4));
+        return _scaleTransformCache.GetOrAdd(key, k =>
+        {
+            var transform = new ScaleTransform(k.x, k.y);
+            transform.Freeze();
+            return transform;
+        });
+    }
+
     public static void Clear()
     {
         _penCache.Clear();
         _brushCache.Clear();
         _textCache.Clear();
+        _rotateTransformCache.Clear();
+        _scaleTransformCache.Clear();
     }
 
     public static void ClearTextCache()

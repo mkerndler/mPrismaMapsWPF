@@ -38,12 +38,24 @@ public class CadDocumentModel
         if (Document == null || !ModelSpaceEntities.Any())
             return new Extents();
 
-        var extents = new Extents();
-        foreach (var entity in ModelSpaceEntities)
+        // Use PLINQ to compute bounds in parallel, then aggregate
+        var bounds = ModelSpaceEntities
+            .AsParallel()
+            .Select(entity => Extents.GetEntityBoundsPublic(entity))
+            .Where(b => b.HasValue)
+            .Select(b => b!.Value)
+            .ToList();
+
+        if (bounds.Count == 0)
+            return new Extents();
+
+        return new Extents
         {
-            extents.Expand(entity);
-        }
-        return extents;
+            MinX = bounds.Min(b => b.minX),
+            MinY = bounds.Min(b => b.minY),
+            MaxX = bounds.Max(b => b.maxX),
+            MaxY = bounds.Max(b => b.maxY)
+        };
     }
 }
 
@@ -63,7 +75,7 @@ public class Extents
 
     public void Expand(Entity entity)
     {
-        var bbox = GetEntityBounds(entity);
+        var bbox = GetEntityBoundsPublic(entity);
         if (bbox.HasValue)
         {
             MinX = Math.Min(MinX, bbox.Value.minX);
@@ -73,7 +85,7 @@ public class Extents
         }
     }
 
-    private static (double minX, double minY, double maxX, double maxY)? GetEntityBounds(Entity entity)
+    public static (double minX, double minY, double maxX, double maxY)? GetEntityBoundsPublic(Entity entity)
     {
         return entity switch
         {
