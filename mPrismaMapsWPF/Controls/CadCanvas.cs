@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using ACadSharp.Entities;
 using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
@@ -20,6 +21,16 @@ public class CadCanvas : FrameworkElement
     private WpfPoint _offset;
     private double _scale = 1.0;
     private Extents? _extents;
+
+    // Bitmap caching for performance
+    private RenderTargetBitmap? _cachedBitmap;
+    private double _cachedScale;
+    private WpfPoint _cachedOffset;
+    private int _cachedWidth;
+    private int _cachedHeight;
+    private bool _cacheValid;
+    private HashSet<ulong>? _cachedSelectedHandles;
+    private HashSet<string>? _cachedHiddenLayers;
 
     public CadCanvas()
     {
@@ -113,6 +124,7 @@ public class CadCanvas : FrameworkElement
         set
         {
             _scale = Math.Max(0.001, Math.Min(1000, value));
+            InvalidateCache(); // Scale changed
             Render();
         }
     }
@@ -136,6 +148,7 @@ public class CadCanvas : FrameworkElement
             extents.CenterY + (ActualHeight / 2) / _scale
         );
 
+        InvalidateCache(); // View changed completely
         Render();
     }
 
@@ -161,13 +174,176 @@ public class CadCanvas : FrameworkElement
 
     public void Render()
     {
+        RenderWithCache(forceFullRender: false);
+    }
+
+    /// <summary>
+    /// Forces a full re-render, invalidating any cached bitmap.
+    /// </summary>
+    public void InvalidateCache()
+    {
+        _cacheValid = false;
+        _cachedBitmap = null;
+    }
+
+    private void RenderWithCache(bool forceFullRender)
+    {
         using var dc = _drawingVisual.RenderOpen();
 
         dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, ActualWidth, ActualHeight));
 
         var entities = Entities;
-        if (entities == null)
+        if (entities == null || ActualWidth <= 0 || ActualHeight <= 0)
             return;
+
+        int width = (int)ActualWidth;
+        int height = (int)ActualHeight;
+
+        // Check if we need to invalidate the cache
+        bool scaleChanged = Math.Abs(_scale - _cachedScale) > 0.0001;
+        bool sizeChanged = width != _cachedWidth || height != _cachedHeight;
+        bool selectionChanged = !SelectionMatchesCache();
+        bool layersChanged = !HiddenLayersMatchCache();
+
+        // During panning with valid cache, use fast bitmap offset rendering
+        if (_isPanning && _cacheValid && !scaleChanged && !sizeChanged && !forceFullRender)
+        {
+            RenderFromCacheWithOffset(dc, width, height);
+            return;
+        }
+
+        // If only selection changed, we can render cache + selection overlay
+        if (_cacheValid && !scaleChanged && !sizeChanged && !layersChanged && selectionChanged && !forceFullRender)
+        {
+            RenderCacheWithSelectionOverlay(dc, entities, width, height);
+            return;
+        }
+
+        // Full render required - rebuild the cache
+        if (!_cacheValid || scaleChanged || sizeChanged || layersChanged || forceFullRender)
+        {
+            RebuildCache(entities, width, height);
+        }
+
+        // Draw from cache
+        if (_cachedBitmap != null)
+        {
+            dc.DrawImage(_cachedBitmap, new Rect(0, 0, width, height));
+        }
+
+        // Draw selection overlay
+        RenderSelectionOverlay(dc, entities);
+    }
+
+    private bool SelectionMatchesCache()
+    {
+        var currentHandles = SelectedHandles?.ToHashSet() ?? new HashSet<ulong>();
+        if (_cachedSelectedHandles == null)
+            return currentHandles.Count == 0;
+        return _cachedSelectedHandles.SetEquals(currentHandles);
+    }
+
+    private bool HiddenLayersMatchCache()
+    {
+        var currentLayers = HiddenLayers?.ToHashSet() ?? new HashSet<string>();
+        if (_cachedHiddenLayers == null)
+            return currentLayers.Count == 0;
+        return _cachedHiddenLayers.SetEquals(currentLayers);
+    }
+
+    private void RebuildCache(IEnumerable<Entity> entities, int width, int height)
+    {
+        // Create a new bitmap for caching
+        var dpi = VisualTreeHelper.GetDpi(this);
+        _cachedBitmap = new RenderTargetBitmap(
+            (int)(width * dpi.DpiScaleX),
+            (int)(height * dpi.DpiScaleY),
+            dpi.PixelsPerInchX,
+            dpi.PixelsPerInchY,
+            PixelFormats.Pbgra32);
+
+        var cacheVisual = new DrawingVisual();
+        using (var cacheDc = cacheVisual.RenderOpen())
+        {
+            // Draw background
+            cacheDc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, width, height));
+
+            // Create render context WITHOUT selection (cache unselected entities)
+            var renderContext = new RenderContext
+            {
+                Scale = _scale,
+                Offset = _offset,
+                DefaultColor = Colors.White,
+                LineThickness = 1.0,
+                ShowSelection = false, // Don't show selection in cache
+                ViewportBounds = CalculateViewportBounds()
+            };
+
+            if (HiddenLayers != null)
+            {
+                foreach (var layer in HiddenLayers)
+                {
+                    renderContext.HiddenLayers.Add(layer);
+                }
+            }
+
+            _renderService.RenderEntities(cacheDc, entities, renderContext);
+        }
+
+        _cachedBitmap.Render(cacheVisual);
+        _cachedBitmap.Freeze(); // Freeze for performance
+
+        // Update cache metadata
+        _cachedScale = _scale;
+        _cachedOffset = _offset;
+        _cachedWidth = width;
+        _cachedHeight = height;
+        _cachedHiddenLayers = HiddenLayers?.ToHashSet() ?? new HashSet<string>();
+        _cachedSelectedHandles = SelectedHandles?.ToHashSet() ?? new HashSet<ulong>();
+        _cacheValid = true;
+    }
+
+    private void RenderFromCacheWithOffset(DrawingContext dc, int width, int height)
+    {
+        if (_cachedBitmap == null)
+            return;
+
+        // Calculate the pixel offset from cached position
+        double deltaX = (_offset.X - _cachedOffset.X) * _scale;
+        double deltaY = (_offset.Y - _cachedOffset.Y) * _scale;
+
+        // Draw the cached bitmap with offset
+        dc.DrawImage(_cachedBitmap, new Rect(deltaX, deltaY, width, height));
+
+        // Draw selection overlay at current position
+        var entities = Entities;
+        if (entities != null)
+        {
+            RenderSelectionOverlay(dc, entities);
+        }
+    }
+
+    private void RenderCacheWithSelectionOverlay(DrawingContext dc, IEnumerable<Entity> entities, int width, int height)
+    {
+        // Draw cached bitmap
+        if (_cachedBitmap != null)
+        {
+            dc.DrawImage(_cachedBitmap, new Rect(0, 0, width, height));
+        }
+
+        // Draw selection overlay
+        RenderSelectionOverlay(dc, entities);
+
+        // Update cached selection
+        _cachedSelectedHandles = SelectedHandles?.ToHashSet() ?? new HashSet<ulong>();
+    }
+
+    private void RenderSelectionOverlay(DrawingContext dc, IEnumerable<Entity> entities)
+    {
+        if (SelectedHandles == null || !SelectedHandles.Any())
+            return;
+
+        var selectedSet = SelectedHandles.ToHashSet();
 
         var renderContext = new RenderContext
         {
@@ -179,12 +355,9 @@ public class CadCanvas : FrameworkElement
             ViewportBounds = CalculateViewportBounds()
         };
 
-        if (SelectedHandles != null)
+        foreach (var handle in selectedSet)
         {
-            foreach (var handle in SelectedHandles)
-            {
-                renderContext.SelectedHandles.Add(handle);
-            }
+            renderContext.SelectedHandles.Add(handle);
         }
 
         if (HiddenLayers != null)
@@ -195,7 +368,9 @@ public class CadCanvas : FrameworkElement
             }
         }
 
-        _renderService.RenderEntities(dc, entities, renderContext);
+        // Only render selected entities
+        var selectedEntities = entities.Where(e => selectedSet.Contains(e.Handle));
+        _renderService.RenderEntities(dc, selectedEntities, renderContext);
     }
 
     private Rect CalculateViewportBounds()
@@ -227,6 +402,7 @@ public class CadCanvas : FrameworkElement
         if (d is CadCanvas canvas)
         {
             canvas.CalculateExtents();
+            canvas.InvalidateCache(); // Entities changed - full cache rebuild needed
             canvas.Render();
         }
     }
@@ -235,6 +411,7 @@ public class CadCanvas : FrameworkElement
     {
         if (d is CadCanvas canvas)
         {
+            // Selection changes don't invalidate cache - we render selection as overlay
             canvas.Render();
         }
     }
@@ -243,6 +420,7 @@ public class CadCanvas : FrameworkElement
     {
         if (d is CadCanvas canvas)
         {
+            canvas.InvalidateCache(); // Layer visibility changed - full cache rebuild needed
             canvas.Render();
         }
     }
@@ -290,6 +468,7 @@ public class CadCanvas : FrameworkElement
             screenPoint.Y / _scale + cadPoint.Y
         );
 
+        // Scale changed - cache will be automatically invalidated in RenderWithCache
         Render();
     }
 
@@ -368,6 +547,7 @@ public class CadCanvas : FrameworkElement
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        InvalidateCache(); // Size changed - need new bitmap
         Render();
     }
 
@@ -384,6 +564,10 @@ public class CadCanvas : FrameworkElement
         _isPanning = false;
         ReleaseMouseCapture();
         Cursor = IsPanMode ? Cursors.Hand : Cursors.Arrow;
+
+        // Rebuild cache at new offset position for crisp rendering
+        InvalidateCache();
+        Render();
     }
 }
 
