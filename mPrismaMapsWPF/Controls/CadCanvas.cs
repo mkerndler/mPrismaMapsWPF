@@ -3,6 +3,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using ACadSharp.Entities;
+using mPrismaMapsWPF.Drawing;
 using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Rendering;
@@ -32,6 +33,29 @@ public class CadCanvas : FrameworkElement
     private HashSet<ulong>? _cachedSelectedHandles;
     private HashSet<string>? _cachedHiddenLayers;
 
+    // Drawing support
+    private IDrawingTool? _currentTool;
+    private WpfPoint _currentCadPoint;
+
+    // Grid rendering
+    private static readonly Pen GridPenMinor = CreateGridPen(Color.FromArgb(40, 128, 128, 128));
+    private static readonly Pen GridPenMajor = CreateGridPen(Color.FromArgb(80, 128, 128, 128));
+    private static readonly Pen PreviewPen = CreatePreviewPen();
+
+    private static Pen CreateGridPen(Color color)
+    {
+        var pen = new Pen(new SolidColorBrush(color), 1);
+        pen.Freeze();
+        return pen;
+    }
+
+    private static Pen CreatePreviewPen()
+    {
+        var pen = new Pen(Brushes.Cyan, 1.5) { DashStyle = DashStyles.Dash };
+        pen.Freeze();
+        return pen;
+    }
+
     public CadCanvas()
     {
         _renderService = new RenderService();
@@ -48,6 +72,7 @@ public class CadCanvas : FrameworkElement
         MouseRightButtonUp += OnMouseRightButtonUp;
         MouseMove += OnMouseMove;
         SizeChanged += OnSizeChanged;
+        KeyDown += OnKeyDown;
     }
 
     public static readonly DependencyProperty EntitiesProperty =
@@ -115,8 +140,35 @@ public class CadCanvas : FrameworkElement
         set => SetValue(ExtentsProperty, value);
     }
 
+    public static readonly DependencyProperty DrawingModeProperty =
+        DependencyProperty.Register(
+            nameof(DrawingMode),
+            typeof(DrawingMode),
+            typeof(CadCanvas),
+            new PropertyMetadata(DrawingMode.Select, OnDrawingModeChanged));
+
+    public DrawingMode DrawingMode
+    {
+        get => (DrawingMode)GetValue(DrawingModeProperty);
+        set => SetValue(DrawingModeProperty, value);
+    }
+
+    public static readonly DependencyProperty GridSettingsProperty =
+        DependencyProperty.Register(
+            nameof(GridSettings),
+            typeof(GridSnapSettings),
+            typeof(CadCanvas),
+            new PropertyMetadata(null, OnGridSettingsChanged));
+
+    public GridSnapSettings? GridSettings
+    {
+        get => (GridSnapSettings?)GetValue(GridSettingsProperty);
+        set => SetValue(GridSettingsProperty, value);
+    }
+
     public event EventHandler<CadMouseEventArgs>? CadMouseMove;
     public event EventHandler<CadEntityClickEventArgs>? EntityClicked;
+    public event EventHandler<DrawingCompletedEventArgs>? DrawingCompleted;
 
     public double Scale
     {
@@ -178,6 +230,46 @@ public class CadCanvas : FrameworkElement
     }
 
     /// <summary>
+    /// Sets the current drawing tool based on the drawing mode.
+    /// </summary>
+    public void SetDrawingTool(IDrawingTool? tool)
+    {
+        if (_currentTool != null)
+        {
+            _currentTool.Completed -= OnDrawingToolCompleted;
+            _currentTool.Cancelled -= OnDrawingToolCancelled;
+            _currentTool.Reset();
+        }
+
+        _currentTool = tool;
+
+        if (_currentTool != null)
+        {
+            _currentTool.Completed += OnDrawingToolCompleted;
+            _currentTool.Cancelled += OnDrawingToolCancelled;
+        }
+
+        UpdateCursor();
+        Render();
+    }
+
+    /// <summary>
+    /// Gets the snapped CAD point based on current grid settings.
+    /// </summary>
+    public WpfPoint GetSnappedCadPoint(WpfPoint screenPoint)
+    {
+        var cadPoint = ScreenToCad(screenPoint);
+
+        if (GridSettings != null && GridSettings.IsEnabled)
+        {
+            var snapped = SnapHelper.SnapToGrid(cadPoint, GridSettings);
+            return snapped;
+        }
+
+        return cadPoint;
+    }
+
+    /// <summary>
     /// Forces a full re-render, invalidating any cached bitmap.
     /// </summary>
     public void InvalidateCache()
@@ -233,6 +325,104 @@ public class CadCanvas : FrameworkElement
 
         // Draw selection overlay
         RenderSelectionOverlay(dc, entities);
+
+        // Draw grid (on top of entities but below preview)
+        RenderGrid(dc);
+
+        // Draw drawing preview
+        RenderDrawingPreview(dc);
+    }
+
+    private void RenderGrid(DrawingContext dc)
+    {
+        if (GridSettings == null || !GridSettings.ShowGrid)
+            return;
+
+        var viewport = CalculateViewportBounds();
+        double spacingX = GridSettings.SpacingX;
+        double spacingY = GridSettings.SpacingY;
+
+        if (spacingX <= 0 || spacingY <= 0)
+            return;
+
+        // Don't render grid if spacing is too small on screen
+        double screenSpacingX = spacingX * _scale;
+        double screenSpacingY = spacingY * _scale;
+
+        if (screenSpacingX < 5 || screenSpacingY < 5)
+            return;
+
+        // Calculate grid line range
+        double startX = Math.Floor((viewport.Left - GridSettings.OriginX) / spacingX) * spacingX + GridSettings.OriginX;
+        double endX = viewport.Right;
+        double startY = Math.Floor((viewport.Top - GridSettings.OriginY) / spacingY) * spacingY + GridSettings.OriginY;
+        double endY = viewport.Bottom;
+
+        // Limit number of grid lines for performance
+        int maxLines = 200;
+        int lineCount = 0;
+
+        // Draw vertical lines
+        for (double x = startX; x <= endX && lineCount < maxLines; x += spacingX)
+        {
+            var screenStart = CadToScreen(x, viewport.Top);
+            var screenEnd = CadToScreen(x, viewport.Bottom);
+
+            bool isMajor = Math.Abs(x % (spacingX * 5)) < 0.0001;
+            dc.DrawLine(isMajor ? GridPenMajor : GridPenMinor, screenStart, screenEnd);
+            lineCount++;
+        }
+
+        // Draw horizontal lines
+        for (double y = startY; y <= endY && lineCount < maxLines; y += spacingY)
+        {
+            var screenStart = CadToScreen(viewport.Left, y);
+            var screenEnd = CadToScreen(viewport.Right, y);
+
+            bool isMajor = Math.Abs(y % (spacingY * 5)) < 0.0001;
+            dc.DrawLine(isMajor ? GridPenMajor : GridPenMinor, screenStart, screenEnd);
+            lineCount++;
+        }
+    }
+
+    private void RenderDrawingPreview(DrawingContext dc)
+    {
+        if (_currentTool == null || !_currentTool.IsDrawing)
+            return;
+
+        var previewPoints = _currentTool.GetPreviewPoints();
+        if (previewPoints == null || previewPoints.Count < 2)
+            return;
+
+        // Convert CAD points to screen points
+        var screenPoints = previewPoints.Select(p => CadToScreen(p.X, p.Y)).ToList();
+
+        // Draw preview lines
+        for (int i = 0; i < screenPoints.Count - 1; i++)
+        {
+            dc.DrawLine(PreviewPen, screenPoints[i], screenPoints[i + 1]);
+        }
+
+        // Close the shape if it's a polygon preview
+        if (_currentTool.IsPreviewClosed && screenPoints.Count > 2)
+        {
+            dc.DrawLine(PreviewPen, screenPoints[^1], screenPoints[0]);
+        }
+
+        // Draw points
+        var pointBrush = Brushes.Cyan;
+        foreach (var point in screenPoints)
+        {
+            dc.DrawEllipse(pointBrush, null, point, 4, 4);
+        }
+    }
+
+    private WpfPoint CadToScreen(double cadX, double cadY)
+    {
+        return new WpfPoint(
+            (cadX + _offset.X) * _scale,
+            (-cadY + _offset.Y) * _scale
+        );
     }
 
     private bool SelectionMatchesCache()
@@ -433,6 +623,74 @@ public class CadCanvas : FrameworkElement
         }
     }
 
+    private static void OnDrawingModeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas canvas)
+        {
+            canvas.UpdateDrawingTool();
+        }
+    }
+
+    private static void OnGridSettingsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas canvas)
+        {
+            if (e.OldValue is GridSnapSettings oldSettings)
+            {
+                oldSettings.PropertyChanged -= canvas.OnGridSettingsPropertyChanged;
+            }
+
+            if (e.NewValue is GridSnapSettings newSettings)
+            {
+                newSettings.PropertyChanged += canvas.OnGridSettingsPropertyChanged;
+            }
+
+            canvas.Render();
+        }
+    }
+
+    private void OnGridSettingsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        Render();
+    }
+
+    private void UpdateDrawingTool()
+    {
+        IDrawingTool? tool = DrawingMode switch
+        {
+            DrawingMode.DrawLine => new LineTool(),
+            DrawingMode.DrawPolyline => new PolylineTool(),
+            DrawingMode.DrawPolygon => new PolygonTool(),
+            _ => null
+        };
+
+        SetDrawingTool(tool);
+    }
+
+    private void OnDrawingToolCompleted(object? sender, DrawingCompletedEventArgs e)
+    {
+        DrawingCompleted?.Invoke(this, e);
+
+        // Reset tool for next drawing
+        _currentTool?.Reset();
+        Render();
+    }
+
+    private void OnDrawingToolCancelled(object? sender, EventArgs e)
+    {
+        Render();
+    }
+
+    private void UpdateCursor()
+    {
+        Cursor = DrawingMode switch
+        {
+            DrawingMode.Pan => Cursors.Hand,
+            DrawingMode.DrawLine or DrawingMode.DrawPolyline or DrawingMode.DrawPolygon => Cursors.Cross,
+            _ => Cursors.Arrow
+        };
+    }
+
     private void CalculateExtents()
     {
         var entities = Entities;
@@ -446,6 +704,16 @@ public class CadCanvas : FrameworkElement
         foreach (var entity in entities)
         {
             _extents.Expand(entity);
+        }
+    }
+
+    private void OnKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_currentTool != null)
+        {
+            _currentTool.OnKeyDown(e.Key);
+            Render();
+            e.Handled = true;
         }
     }
 
@@ -476,15 +744,24 @@ public class CadCanvas : FrameworkElement
     {
         Focus();
 
-        if (IsPanMode)
+        var screenPoint = e.GetPosition(this);
+        var cadPoint = GetSnappedCadPoint(screenPoint);
+
+        // Handle drawing mode
+        if (_currentTool != null && DrawingMode != DrawingMode.Select && DrawingMode != DrawingMode.Pan)
         {
-            StartPan(e.GetPosition(this));
+            _currentTool.OnMouseDown(cadPoint, MouseButton.Left);
+            Render();
             return;
         }
 
-        var screenPoint = e.GetPosition(this);
-        var cadPoint = ScreenToCad(screenPoint);
+        if (IsPanMode || DrawingMode == DrawingMode.Pan)
+        {
+            StartPan(screenPoint);
+            return;
+        }
 
+        // Selection mode
         var entities = Entities;
         if (entities == null)
             return;
@@ -515,20 +792,42 @@ public class CadCanvas : FrameworkElement
 
     private void OnMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
-        StartPan(e.GetPosition(this));
+        var screenPoint = e.GetPosition(this);
+        var cadPoint = GetSnappedCadPoint(screenPoint);
+
+        // If drawing, right-click can complete or cancel
+        if (_currentTool != null && _currentTool.IsDrawing)
+        {
+            _currentTool.OnMouseDown(cadPoint, MouseButton.Right);
+            Render();
+            return;
+        }
+
+        StartPan(screenPoint);
     }
 
     private void OnMouseRightButtonUp(object sender, MouseButtonEventArgs e)
     {
-        EndPan();
+        if (_isPanning)
+        {
+            EndPan();
+        }
     }
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
         var screenPoint = e.GetPosition(this);
-        var cadPoint = ScreenToCad(screenPoint);
+        var cadPoint = GetSnappedCadPoint(screenPoint);
+        _currentCadPoint = cadPoint;
 
         CadMouseMove?.Invoke(this, new CadMouseEventArgs(cadPoint.X, cadPoint.Y));
+
+        // Update drawing tool preview
+        if (_currentTool != null && _currentTool.IsDrawing)
+        {
+            _currentTool.OnMouseMove(cadPoint);
+            Render();
+        }
 
         if (_isPanning)
         {

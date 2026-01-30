@@ -6,8 +6,10 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using mPrismaMapsWPF.Commands;
+using mPrismaMapsWPF.Drawing;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Services;
+using WpfPoint = System.Windows.Point;
 
 namespace mPrismaMapsWPF.ViewModels;
 
@@ -82,6 +84,24 @@ public partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private string? _redoDescription;
+
+    [ObservableProperty]
+    private DrawingMode _drawingMode = DrawingMode.Select;
+
+    [ObservableProperty]
+    private GridSnapSettings _gridSettings = new();
+
+    [ObservableProperty]
+    private bool _isSnapEnabled = true;
+
+    [ObservableProperty]
+    private bool _isGridVisible = true;
+
+    [ObservableProperty]
+    private double _gridSpacing = 10.0;
+
+    [ObservableProperty]
+    private string _drawingStatusText = "";
 
     public ObservableCollection<EntityModel> Entities { get; } = new();
     public CadDocumentModel Document => _documentService.CurrentDocument;
@@ -244,15 +264,82 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void SetPanMode()
     {
-        IsPanMode = true;
-        IsSelectMode = false;
+        DrawingMode = DrawingMode.Pan;
+        UpdateModeFlags();
     }
 
     [RelayCommand]
     private void SetSelectMode()
     {
-        IsPanMode = false;
-        IsSelectMode = true;
+        DrawingMode = DrawingMode.Select;
+        UpdateModeFlags();
+    }
+
+    [RelayCommand]
+    private void SetDrawLineMode()
+    {
+        DrawingMode = DrawingMode.DrawLine;
+        UpdateModeFlags();
+        DrawingStatusText = "Line: Click to set start point";
+    }
+
+    [RelayCommand]
+    private void SetDrawPolylineMode()
+    {
+        DrawingMode = DrawingMode.DrawPolyline;
+        UpdateModeFlags();
+        DrawingStatusText = "Polyline: Click to add points, double-click or Enter to finish";
+    }
+
+    [RelayCommand]
+    private void SetDrawPolygonMode()
+    {
+        DrawingMode = DrawingMode.DrawPolygon;
+        UpdateModeFlags();
+        DrawingStatusText = "Polygon: Click to add points (min 3), double-click or Enter to close";
+    }
+
+    [RelayCommand]
+    private void ToggleSnap()
+    {
+        IsSnapEnabled = !IsSnapEnabled;
+        GridSettings.IsEnabled = IsSnapEnabled;
+    }
+
+    [RelayCommand]
+    private void ToggleGrid()
+    {
+        IsGridVisible = !IsGridVisible;
+        GridSettings.ShowGrid = IsGridVisible;
+        RenderRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void UpdateModeFlags()
+    {
+        IsPanMode = DrawingMode == DrawingMode.Pan;
+        IsSelectMode = DrawingMode == DrawingMode.Select;
+
+        if (DrawingMode == DrawingMode.Select || DrawingMode == DrawingMode.Pan)
+        {
+            DrawingStatusText = "";
+        }
+    }
+
+    partial void OnGridSpacingChanged(double value)
+    {
+        GridSettings.SetUniformSpacing(value);
+        RenderRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    partial void OnIsSnapEnabledChanged(bool value)
+    {
+        GridSettings.IsEnabled = value;
+    }
+
+    partial void OnIsGridVisibleChanged(bool value)
+    {
+        GridSettings.ShowGrid = value;
+        RenderRequested?.Invoke(this, EventArgs.Empty);
     }
 
     [RelayCommand]
@@ -380,6 +467,12 @@ public partial class MainWindowViewModel : ObservableObject
             Entities.Add(new EntityModel(entity));
         }
 
+        // Update grid spacing based on document size
+        UpdateGridSpacingFromExtents();
+
+        // Reset to select mode
+        SetSelectMode();
+
         SaveFileCommand.NotifyCanExecuteChanged();
         SaveFileAsCommand.NotifyCanExecuteChanged();
 
@@ -418,5 +511,91 @@ public partial class MainWindowViewModel : ObservableObject
         }
         EntityCount = Entities.Count;
         RenderRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Handles the completion of a drawing operation and creates the corresponding entity.
+    /// </summary>
+    public void OnDrawingCompleted(DrawingCompletedEventArgs e)
+    {
+        if (e.Points.Count < 2)
+            return;
+
+        // Ensure document exists (create if needed for drawing without loading a file)
+        _documentService.CurrentDocument.EnsureDocumentExists();
+
+        // Get or create the User Drawings layer
+        var userLayer = _documentService.CurrentDocument.GetOrCreateUserDrawingsLayer();
+        if (userLayer == null)
+            return;
+
+        Entity? entity = null;
+
+        switch (e.Mode)
+        {
+            case DrawingMode.DrawLine:
+                if (e.Points.Count >= 2)
+                {
+                    entity = new Line
+                    {
+                        StartPoint = new CSMath.XYZ(e.Points[0].X, e.Points[0].Y, 0),
+                        EndPoint = new CSMath.XYZ(e.Points[1].X, e.Points[1].Y, 0),
+                        Layer = userLayer
+                    };
+                }
+                break;
+
+            case DrawingMode.DrawPolyline:
+            case DrawingMode.DrawPolygon:
+                if (e.Points.Count >= 2)
+                {
+                    var polyline = new LwPolyline
+                    {
+                        IsClosed = e.IsClosed,
+                        Layer = userLayer
+                    };
+
+                    foreach (var point in e.Points)
+                    {
+                        polyline.Vertices.Add(new LwPolyline.Vertex(new CSMath.XY(point.X, point.Y)));
+                    }
+
+                    entity = polyline;
+                }
+                break;
+        }
+
+        if (entity != null)
+        {
+            var command = new AddEntityCommand(_documentService.CurrentDocument, entity);
+            _undoRedoService.Execute(command);
+
+            // Add to entities collection
+            Entities.Add(new EntityModel(entity));
+            EntityCount = Entities.Count;
+
+            StatusText = $"Created {entity.GetType().Name} on layer '{CadDocumentModel.UserDrawingsLayerName}'";
+
+            // Refresh layers panel to show new layer if created
+            LayerPanel.RefreshLayers();
+
+            // Trigger render
+            EntitiesChanged?.Invoke(this, EventArgs.Empty);
+            RenderRequested?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Updates the grid spacing based on the loaded document's extents.
+    /// </summary>
+    public void UpdateGridSpacingFromExtents()
+    {
+        var extents = _documentService.CurrentDocument.GetExtents();
+        if (extents.IsValid)
+        {
+            double maxDimension = Math.Max(extents.Width, extents.Height);
+            double autoSpacing = GridSnapSettings.CalculateAutoGridSpacing(maxDimension);
+            GridSpacing = autoSpacing;
+        }
     }
 }

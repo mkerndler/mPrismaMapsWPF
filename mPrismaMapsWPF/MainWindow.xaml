@@ -97,10 +97,15 @@
         <KeyBinding Key="Z" Modifiers="Ctrl+Shift" Command="{Binding RedoCommand}"/>
         <KeyBinding Key="A" Modifiers="Ctrl" Command="{Binding SelectAllCommand}"/>
         <KeyBinding Key="Delete" Command="{Binding DeleteSelectedCommand}"/>
-        <KeyBinding Key="Escape" Command="{Binding ClearSelectionCommand}"/>
         <KeyBinding Key="Add" Command="{Binding ZoomInCommand}"/>
         <KeyBinding Key="Subtract" Command="{Binding ZoomOutCommand}"/>
         <KeyBinding Key="Home" Command="{Binding ZoomToFitCommand}"/>
+        <!-- Drawing shortcuts -->
+        <KeyBinding Key="L" Command="{Binding SetDrawLineModeCommand}"/>
+        <KeyBinding Key="P" Command="{Binding SetPanModeCommand}"/>
+        <KeyBinding Key="V" Command="{Binding SetSelectModeCommand}"/>
+        <KeyBinding Key="F7" Command="{Binding ToggleGridCommand}"/>
+        <KeyBinding Key="F9" Command="{Binding ToggleSnapCommand}"/>
     </Window.InputBindings>
 
     <Grid>
@@ -204,15 +209,53 @@
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
                               IsChecked="{Binding IsSelectMode}"
                               Command="{Binding SetSelectModeCommand}"
-                              ToolTip="Select Mode">
+                              ToolTip="Select Mode (S)">
                     <TextBlock Text="&#x2B9C;" FontSize="16"/>
                 </ToggleButton>
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
                               IsChecked="{Binding IsPanMode}"
                               Command="{Binding SetPanModeCommand}"
-                              ToolTip="Pan Mode">
+                              ToolTip="Pan Mode (P)">
                     <TextBlock Text="&#x270B;" FontSize="16"/>
                 </ToggleButton>
+                <Separator Margin="8,4"/>
+                <!-- Drawing Tools -->
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding SetDrawLineModeCommand}"
+                        ToolTip="Draw Line (L)">
+                    <TextBlock Text="/" FontSize="18" FontWeight="Bold"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding SetDrawPolylineModeCommand}"
+                        ToolTip="Draw Polyline">
+                    <TextBlock Text="&#x2571;&#x2572;" FontSize="12"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding SetDrawPolygonModeCommand}"
+                        ToolTip="Draw Polygon">
+                    <TextBlock Text="&#x2B21;" FontSize="16"/>
+                </Button>
+                <Separator Margin="8,4"/>
+                <!-- Snap and Grid -->
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding IsSnapEnabled}"
+                              Command="{Binding ToggleSnapCommand}"
+                              ToolTip="Toggle Snap (F9)">
+                    <TextBlock Text="&#x229E;" FontSize="16"/>
+                </ToggleButton>
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding IsGridVisible}"
+                              Command="{Binding ToggleGridCommand}"
+                              ToolTip="Toggle Grid (F7)">
+                    <TextBlock Text="&#x25A6;" FontSize="16"/>
+                </ToggleButton>
+                <TextBlock Text="Grid:" Foreground="White" VerticalAlignment="Center" Margin="8,0,4,0"/>
+                <TextBox Text="{Binding GridSpacing, UpdateSourceTrigger=PropertyChanged}"
+                         Width="50" Height="24"
+                         Background="#FF3C3C3C" Foreground="White"
+                         BorderBrush="#FF555555"
+                         VerticalContentAlignment="Center"
+                         Padding="4,0"/>
             </ToolBar>
         </ToolBarTray>
 
@@ -472,12 +515,37 @@
                 <TextBlock Text="{Binding StatusText}"/>
             </StatusBarItem>
             <Separator/>
+            <StatusBarItem MinWidth="200">
+                <TextBlock Text="{Binding DrawingStatusText}" FontStyle="Italic"/>
+            </StatusBarItem>
+            <Separator/>
             <StatusBarItem>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="X: "/>
                     <TextBlock Text="{Binding MouseX, StringFormat=F4}" Width="80"/>
                     <TextBlock Text="Y: " Margin="16,0,0,0"/>
                     <TextBlock Text="{Binding MouseY, StringFormat=F4}" Width="80"/>
+                </StackPanel>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Snap: "/>
+                    <TextBlock>
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="Off"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSnapEnabled}" Value="True">
+                                        <Setter Property="Text" Value="On"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <TextBlock Text=" (" Margin="2,0,0,0"/>
+                    <TextBlock Text="{Binding GridSpacing}"/>
+                    <TextBlock Text=")"/>
                 </StackPanel>
             </StatusBarItem>
             <Separator/>

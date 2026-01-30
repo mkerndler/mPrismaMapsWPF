@@ -19,6 +19,46 @@ public class CadDocumentModel
     public IEnumerable<BlockRecord> Blocks =>
         Document?.BlockRecords ?? Enumerable.Empty<BlockRecord>();
 
+    public const string UserDrawingsLayerName = "User Drawings";
+
+    /// <summary>
+    /// Gets or creates the "User Drawings" layer for user-created entities.
+    /// </summary>
+    public Layer? GetOrCreateUserDrawingsLayer()
+    {
+        if (Document == null)
+            return null;
+
+        // Check if layer already exists
+        var existingLayer = Document.Layers.FirstOrDefault(l => l.Name == UserDrawingsLayerName);
+        if (existingLayer != null)
+            return existingLayer;
+
+        // Create new layer
+        var userLayer = new Layer(UserDrawingsLayerName)
+        {
+            Color = new ACadSharp.Color(6) // Magenta color for visibility
+        };
+
+        Document.Layers.Add(userLayer);
+        IsDirty = true;
+
+        return userLayer;
+    }
+
+    /// <summary>
+    /// Creates a new document if none is loaded. Used for drawing without loading a file.
+    /// </summary>
+    public void EnsureDocumentExists()
+    {
+        if (Document == null)
+        {
+            Document = new CadDocument();
+            FilePath = null;
+            IsDirty = true;
+        }
+    }
+
     public void Load(CadDocument document, string filePath)
     {
         Document = document;

@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using ACadSharp.Entities;
 using mPrismaMapsWPF.Commands;
 using mPrismaMapsWPF.Controls;
+using mPrismaMapsWPF.Drawing;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Services;
 using mPrismaMapsWPF.ViewModels;
@@ -38,14 +39,36 @@ public partial class MainWindow : Window
 
         CadCanvas.CadMouseMove += OnCadMouseMove;
         CadCanvas.EntityClicked += OnEntityClicked;
+        CadCanvas.DrawingCompleted += OnDrawingCompleted;
+
+        // Set up drawing mode binding
+        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
 
         Loaded += OnLoaded;
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainWindowViewModel.DrawingMode))
+        {
+            CadCanvas.DrawingMode = _viewModel.DrawingMode;
+        }
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         UpdateCanvasBindings();
         UpdateDeleteByTypeMenu();
+
+        // Initialize drawing-related canvas properties
+        CadCanvas.GridSettings = _viewModel.GridSettings;
+        CadCanvas.DrawingMode = _viewModel.DrawingMode;
+    }
+
+    private void OnDrawingCompleted(object? sender, DrawingCompletedEventArgs e)
+    {
+        _viewModel.OnDrawingCompleted(e);
+        UpdateCanvasBindings();
     }
 
     private void UpdateDeleteByTypeMenu()
@@ -112,6 +135,7 @@ public partial class MainWindow : Window
     private void OnRenderRequested(object? sender, EventArgs e)
     {
         UpdateCanvasBindings();
+        CadCanvas.InvalidateCache();
         CadCanvas.Render();
     }
 
