@@ -35,6 +35,14 @@ public partial class MainWindowViewModel : ObservableObject
 
         LayerPanel = new LayerPanelViewModel(_documentService, _undoRedoService);
         PropertiesPanel = new PropertiesPanelViewModel(_selectionService, _documentService, _undoRedoService);
+
+        // Subscribe to layer visibility changes to update DeleteHiddenEntities command state
+        LayerPanel.LayerVisibilityChanged += OnLayerVisibilityChangedForCommand;
+    }
+
+    private void OnLayerVisibilityChangedForCommand(object? sender, EventArgs e)
+    {
+        DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
     }
 
     public LayerPanelViewModel LayerPanel { get; }
@@ -103,6 +111,16 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private string _drawingStatusText = "";
 
+    // View transform properties
+    [ObservableProperty]
+    private bool _flipX;
+
+    [ObservableProperty]
+    private bool _flipY;
+
+    [ObservableProperty]
+    private double _viewRotation;
+
     public ObservableCollection<EntityModel> Entities { get; } = new();
     public CadDocumentModel Document => _documentService.CurrentDocument;
 
@@ -112,6 +130,10 @@ public partial class MainWindowViewModel : ObservableObject
     public event EventHandler? RenderRequested;
     public event EventHandler? EntitiesChanged;
     public event EventHandler<SelectEntityTypesEventArgs>? SelectEntityTypesRequested;
+    public event EventHandler? CenterOnOriginRequested;
+    public event EventHandler? ResetViewTransformsRequested;
+    public event EventHandler<RotateViewEventArgs>? RotateViewRequested;
+    public event EventHandler<DeleteOutsideViewportEventArgs>? DeleteOutsideViewportRequested;
 
     [RelayCommand]
     private async Task OpenFileAsync()
@@ -314,6 +336,119 @@ public partial class MainWindowViewModel : ObservableObject
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    [RelayCommand]
+    private void ToggleFlipX()
+    {
+        FlipX = !FlipX;
+        StatusText = FlipX ? "View flipped horizontally" : "Horizontal flip removed";
+    }
+
+    [RelayCommand]
+    private void ToggleFlipY()
+    {
+        FlipY = !FlipY;
+        StatusText = FlipY ? "View flipped vertically" : "Vertical flip removed";
+    }
+
+    [RelayCommand]
+    private void RotateView(double angle)
+    {
+        ViewRotation = angle;
+        StatusText = $"View rotated to {angle}";
+    }
+
+    [RelayCommand]
+    private void RotateViewBy(double delta)
+    {
+        ViewRotation = (ViewRotation + delta) % 360;
+        if (ViewRotation < 0) ViewRotation += 360;
+        StatusText = $"View rotated to {ViewRotation}";
+    }
+
+    [RelayCommand]
+    private void ShowRotateViewDialog()
+    {
+        RotateViewRequested?.Invoke(this, new RotateViewEventArgs(ViewRotation));
+    }
+
+    [RelayCommand]
+    private void CenterOnOrigin()
+    {
+        CenterOnOriginRequested?.Invoke(this, EventArgs.Empty);
+        StatusText = "View centered on origin (0,0)";
+    }
+
+    [RelayCommand]
+    private void ResetViewTransforms()
+    {
+        FlipX = false;
+        FlipY = false;
+        ViewRotation = 0;
+        ResetViewTransformsRequested?.Invoke(this, EventArgs.Empty);
+        StatusText = "View transforms reset";
+    }
+
+    [RelayCommand(CanExecute = nameof(CanDeleteHidden))]
+    private void DeleteHiddenEntities()
+    {
+        var hiddenLayers = LayerPanel.Layers
+            .Where(l => !l.IsVisible)
+            .Select(l => l.Name)
+            .ToList();
+
+        var command = new DeleteHiddenEntitiesCommand(_documentService.CurrentDocument, hiddenLayers);
+        _undoRedoService.Execute(command);
+
+        if (command.DeletedCount == 0)
+        {
+            StatusText = "No hidden or invisible entities found";
+            return;
+        }
+
+        // Refresh entities
+        RefreshEntities();
+        LayerPanel.RefreshLayers();
+
+        // Build status message
+        var parts = new List<string>();
+        if (command.EntitiesOnHiddenLayers > 0)
+            parts.Add($"{command.EntitiesOnHiddenLayers} on hidden layers");
+        if (command.InvisibleEntities > 0)
+            parts.Add($"{command.InvisibleEntities} invisible");
+
+        StatusText = $"Deleted {command.DeletedCount} entities ({string.Join(", ", parts)})";
+    }
+
+    private bool CanDeleteHidden() => _documentService.CurrentDocument.Document != null;
+
+    [RelayCommand(CanExecute = nameof(CanDeleteOutsideViewport))]
+    private void DeleteEntitiesOutsideViewport()
+    {
+        var args = new DeleteOutsideViewportEventArgs();
+        DeleteOutsideViewportRequested?.Invoke(this, args);
+
+        if (args.Cancelled || args.ViewportBounds.IsEmpty)
+        {
+            return;
+        }
+
+        var command = new DeleteEntitiesOutsideViewportCommand(_documentService.CurrentDocument, args.ViewportBounds);
+        _undoRedoService.Execute(command);
+
+        if (command.DeletedCount == 0)
+        {
+            StatusText = "No entities outside viewport";
+            return;
+        }
+
+        // Refresh entities
+        RefreshEntities();
+
+        StatusText = $"Deleted {command.DeletedCount} entities outside viewport";
+    }
+
+    private bool CanDeleteOutsideViewport() => _documentService.CurrentDocument.Document != null;
+
     private void UpdateModeFlags()
     {
         IsPanMode = DrawingMode == DrawingMode.Pan;
@@ -475,6 +610,8 @@ public partial class MainWindowViewModel : ObservableObject
 
         SaveFileCommand.NotifyCanExecuteChanged();
         SaveFileAsCommand.NotifyCanExecuteChanged();
+        DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
+        DeleteEntitiesOutsideViewportCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
         ZoomToFitRequested?.Invoke(this, EventArgs.Empty);
@@ -489,6 +626,8 @@ public partial class MainWindowViewModel : ObservableObject
 
         SaveFileCommand.NotifyCanExecuteChanged();
         SaveFileAsCommand.NotifyCanExecuteChanged();
+        DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
+        DeleteEntitiesOutsideViewportCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }

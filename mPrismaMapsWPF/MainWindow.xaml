@@ -87,6 +87,21 @@
             <Setter Property="Foreground" Value="#FFE0E0E0"/>
             <Setter Property="Margin" Value="8,8,8,4"/>
         </Style>
+
+        <!-- Dark theme style for all menu items including submenus -->
+        <Style TargetType="MenuItem">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="#FF2D2D2D"/>
+        </Style>
+
+        <Style TargetType="ContextMenu">
+            <Setter Property="Background" Value="#FF2D2D2D"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+
+        <Style TargetType="Separator">
+            <Setter Property="Background" Value="#FF555555"/>
+        </Style>
     </Window.Resources>
 
     <Window.InputBindings>
@@ -106,6 +121,11 @@
         <KeyBinding Key="V" Command="{Binding SetSelectModeCommand}"/>
         <KeyBinding Key="F7" Command="{Binding ToggleGridCommand}"/>
         <KeyBinding Key="F9" Command="{Binding ToggleSnapCommand}"/>
+        <!-- View transform shortcuts -->
+        <KeyBinding Key="D0" Modifiers="Ctrl" Command="{Binding CenterOnOriginCommand}"/>
+        <KeyBinding Key="H" Modifiers="Ctrl" Command="{Binding ToggleFlipXCommand}"/>
+        <KeyBinding Key="J" Modifiers="Ctrl" Command="{Binding ToggleFlipYCommand}"/>
+        <KeyBinding Key="R" Modifiers="Ctrl" Command="{Binding ShowRotateViewDialogCommand}"/>
     </Window.InputBindings>
 
     <Grid>
@@ -162,6 +182,28 @@
                 <MenuItem Header="Zoom _In" Command="{Binding ZoomInCommand}" InputGestureText="+"/>
                 <MenuItem Header="Zoom _Out" Command="{Binding ZoomOutCommand}" InputGestureText="-"/>
                 <MenuItem Header="Zoom to _Fit" Command="{Binding ZoomToFitCommand}" InputGestureText="Home"/>
+                <MenuItem Header="Center on _Origin" Command="{Binding CenterOnOriginCommand}" InputGestureText="Ctrl+0"/>
+                <Separator/>
+                <MenuItem Header="Flip _Horizontal" Command="{Binding ToggleFlipXCommand}" IsCheckable="True" IsChecked="{Binding FlipX, Mode=OneWay}"/>
+                <MenuItem Header="Flip _Vertical" Command="{Binding ToggleFlipYCommand}" IsCheckable="True" IsChecked="{Binding FlipY, Mode=OneWay}"/>
+                <Separator/>
+                <MenuItem Header="_Rotate View">
+                    <MenuItem Header="0 (Reset)" Command="{Binding RotateViewCommand}" CommandParameter="0"/>
+                    <MenuItem Header="90 CW" Command="{Binding RotateViewCommand}" CommandParameter="90"/>
+                    <MenuItem Header="180" Command="{Binding RotateViewCommand}" CommandParameter="180"/>
+                    <MenuItem Header="270 (90 CCW)" Command="{Binding RotateViewCommand}" CommandParameter="270"/>
+                    <Separator/>
+                    <MenuItem Header="Rotate +15" Command="{Binding RotateViewByCommand}" CommandParameter="15"/>
+                    <MenuItem Header="Rotate -15" Command="{Binding RotateViewByCommand}" CommandParameter="-15"/>
+                    <Separator/>
+                    <MenuItem Header="_Custom Angle..." Command="{Binding ShowRotateViewDialogCommand}"/>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="Reset All _Transforms" Command="{Binding ResetViewTransformsCommand}"/>
+            </MenuItem>
+            <MenuItem Header="_Tools">
+                <MenuItem Header="_Delete Hidden Entities" Command="{Binding DeleteHiddenEntitiesCommand}" ToolTip="Delete all hidden/invisible entities"/>
+                <MenuItem Header="Delete Entities _Outside Viewport" Command="{Binding DeleteEntitiesOutsideViewportCommand}" ToolTip="Delete all entities outside the current view"/>
             </MenuItem>
         </Menu>
 
@@ -256,6 +298,35 @@
                          BorderBrush="#FF555555"
                          VerticalContentAlignment="Center"
                          Padding="4,0"/>
+                <Separator Margin="8,4"/>
+                <!-- View Transform Tools -->
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding FlipX}"
+                              Command="{Binding ToggleFlipXCommand}"
+                              ToolTip="Flip Horizontal (Ctrl+H)">
+                    <TextBlock Text="&#x2194;" FontSize="16"/>
+                </ToggleButton>
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding FlipY}"
+                              Command="{Binding ToggleFlipYCommand}"
+                              ToolTip="Flip Vertical (Ctrl+J)">
+                    <TextBlock Text="&#x2195;" FontSize="16"/>
+                </ToggleButton>
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding ShowRotateViewDialogCommand}"
+                        ToolTip="Rotate View (Ctrl+R)">
+                    <TextBlock Text="&#x21BB;" FontSize="16"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding CenterOnOriginCommand}"
+                        ToolTip="Center on Origin (Ctrl+0)">
+                    <TextBlock Text="&#x2316;" FontSize="16"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding ResetViewTransformsCommand}"
+                        ToolTip="Reset View Transforms">
+                    <TextBlock Text="&#x21BA;" FontSize="16"/>
+                </Button>
             </ToolBar>
         </ToolBarTray>
 
@@ -546,6 +617,14 @@
                     <TextBlock Text=" (" Margin="2,0,0,0"/>
                     <TextBlock Text="{Binding GridSpacing}"/>
                     <TextBlock Text=")"/>
+                </StackPanel>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Rot: "/>
+                    <TextBlock Text="{Binding ViewRotation, StringFormat=F0}"/>
+                    <TextBlock Text=""/>
                 </StackPanel>
             </StatusBarItem>
             <Separator/>

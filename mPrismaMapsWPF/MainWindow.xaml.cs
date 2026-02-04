@@ -29,6 +29,10 @@ public partial class MainWindow : Window
         _viewModel.RenderRequested += OnRenderRequested;
         _viewModel.EntitiesChanged += OnEntitiesChanged;
         _viewModel.SelectEntityTypesRequested += OnSelectEntityTypesRequested;
+        _viewModel.CenterOnOriginRequested += OnCenterOnOriginRequested;
+        _viewModel.ResetViewTransformsRequested += OnResetViewTransformsRequested;
+        _viewModel.RotateViewRequested += OnRotateViewRequested;
+        _viewModel.DeleteOutsideViewportRequested += OnDeleteOutsideViewportRequested;
         _viewModel.LayerPanel.LayerVisibilityChanged += OnLayerVisibilityChanged;
         _viewModel.LayerPanel.DeleteLayerRequested += OnDeleteLayerRequested;
         _viewModel.LayerPanel.DeleteMultipleLayersRequested += OnDeleteMultipleLayersRequested;
@@ -53,6 +57,18 @@ public partial class MainWindow : Window
         {
             CadCanvas.DrawingMode = _viewModel.DrawingMode;
         }
+        else if (e.PropertyName == nameof(MainWindowViewModel.FlipX))
+        {
+            CadCanvas.FlipX = _viewModel.FlipX;
+        }
+        else if (e.PropertyName == nameof(MainWindowViewModel.FlipY))
+        {
+            CadCanvas.FlipY = _viewModel.FlipY;
+        }
+        else if (e.PropertyName == nameof(MainWindowViewModel.ViewRotation))
+        {
+            CadCanvas.ViewRotation = _viewModel.ViewRotation;
+        }
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -63,6 +79,11 @@ public partial class MainWindow : Window
         // Initialize drawing-related canvas properties
         CadCanvas.GridSettings = _viewModel.GridSettings;
         CadCanvas.DrawingMode = _viewModel.DrawingMode;
+
+        // Initialize view transform properties
+        CadCanvas.FlipX = _viewModel.FlipX;
+        CadCanvas.FlipY = _viewModel.FlipY;
+        CadCanvas.ViewRotation = _viewModel.ViewRotation;
     }
 
     private void OnDrawingCompleted(object? sender, DrawingCompletedEventArgs e)
@@ -301,5 +322,34 @@ public partial class MainWindow : Window
         {
             await _viewModel.LoadFileWithFilterAsync(e.FilePath, dialog.ExcludedTypes);
         }
+    }
+
+    private void OnCenterOnOriginRequested(object? sender, EventArgs e)
+    {
+        CadCanvas.CenterOnOrigin();
+    }
+
+    private void OnResetViewTransformsRequested(object? sender, EventArgs e)
+    {
+        CadCanvas.ResetViewTransforms();
+    }
+
+    private void OnRotateViewRequested(object? sender, RotateViewEventArgs e)
+    {
+        var dialog = new RotateViewDialog(e.CurrentAngle)
+        {
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            _viewModel.ViewRotation = dialog.Angle;
+        }
+    }
+
+    private void OnDeleteOutsideViewportRequested(object? sender, DeleteOutsideViewportEventArgs e)
+    {
+        e.ViewportBounds = CadCanvas.GetViewportBounds();
+        e.Cancelled = false;
     }
 }

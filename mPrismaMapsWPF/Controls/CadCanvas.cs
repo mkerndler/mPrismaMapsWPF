@@ -23,6 +23,11 @@ public class CadCanvas : FrameworkElement
     private double _scale = 1.0;
     private Extents? _extents;
 
+    // View transforms
+    private bool _flipX;
+    private bool _flipY;
+    private double _viewRotation; // degrees
+
     // Bitmap caching for performance
     private RenderTargetBitmap? _cachedBitmap;
     private double _cachedScale;
@@ -166,6 +171,45 @@ public class CadCanvas : FrameworkElement
         set => SetValue(GridSettingsProperty, value);
     }
 
+    public static readonly DependencyProperty FlipXProperty =
+        DependencyProperty.Register(
+            nameof(FlipX),
+            typeof(bool),
+            typeof(CadCanvas),
+            new PropertyMetadata(false, OnViewTransformChanged));
+
+    public bool FlipX
+    {
+        get => (bool)GetValue(FlipXProperty);
+        set => SetValue(FlipXProperty, value);
+    }
+
+    public static readonly DependencyProperty FlipYProperty =
+        DependencyProperty.Register(
+            nameof(FlipY),
+            typeof(bool),
+            typeof(CadCanvas),
+            new PropertyMetadata(false, OnViewTransformChanged));
+
+    public bool FlipY
+    {
+        get => (bool)GetValue(FlipYProperty);
+        set => SetValue(FlipYProperty, value);
+    }
+
+    public static readonly DependencyProperty ViewRotationProperty =
+        DependencyProperty.Register(
+            nameof(ViewRotation),
+            typeof(double),
+            typeof(CadCanvas),
+            new PropertyMetadata(0.0, OnViewTransformChanged));
+
+    public double ViewRotation
+    {
+        get => (double)GetValue(ViewRotationProperty);
+        set => SetValue(ViewRotationProperty, value);
+    }
+
     public event EventHandler<CadMouseEventArgs>? CadMouseMove;
     public event EventHandler<CadEntityClickEventArgs>? EntityClicked;
     public event EventHandler<DrawingCompletedEventArgs>? DrawingCompleted;
@@ -202,6 +246,33 @@ public class CadCanvas : FrameworkElement
 
         InvalidateCache(); // View changed completely
         Render();
+    }
+
+    /// <summary>
+    /// Centers the view on the origin (0,0).
+    /// </summary>
+    public void CenterOnOrigin()
+    {
+        if (ActualWidth <= 0 || ActualHeight <= 0)
+            return;
+
+        _offset = new WpfPoint(
+            (ActualWidth / 2) / _scale,
+            (ActualHeight / 2) / _scale
+        );
+
+        InvalidateCache();
+        Render();
+    }
+
+    /// <summary>
+    /// Resets all view transforms (flip, rotation) to default.
+    /// </summary>
+    public void ResetViewTransforms()
+    {
+        FlipX = false;
+        FlipY = false;
+        ViewRotation = 0;
     }
 
     public void ZoomIn()
@@ -291,6 +362,9 @@ public class CadCanvas : FrameworkElement
         int width = (int)ActualWidth;
         int height = (int)ActualHeight;
 
+        // Apply view transforms (flip and rotation)
+        ApplyViewTransform(dc, width, height);
+
         // Check if we need to invalidate the cache
         bool scaleChanged = Math.Abs(_scale - _cachedScale) > 0.0001;
         bool sizeChanged = width != _cachedWidth || height != _cachedHeight;
@@ -301,6 +375,7 @@ public class CadCanvas : FrameworkElement
         if (_isPanning && _cacheValid && !scaleChanged && !sizeChanged && !forceFullRender)
         {
             RenderFromCacheWithOffset(dc, width, height);
+            RestoreViewTransform(dc);
             return;
         }
 
@@ -308,6 +383,7 @@ public class CadCanvas : FrameworkElement
         if (_cacheValid && !scaleChanged && !sizeChanged && !layersChanged && selectionChanged && !forceFullRender)
         {
             RenderCacheWithSelectionOverlay(dc, entities, width, height);
+            RestoreViewTransform(dc);
             return;
         }
 
@@ -331,6 +407,43 @@ public class CadCanvas : FrameworkElement
 
         // Draw drawing preview
         RenderDrawingPreview(dc);
+
+        RestoreViewTransform(dc);
+    }
+
+    private void ApplyViewTransform(DrawingContext dc, int width, int height)
+    {
+        if (!_flipX && !_flipY && Math.Abs(_viewRotation) < 0.001)
+            return;
+
+        double centerX = width / 2.0;
+        double centerY = height / 2.0;
+
+        var transformGroup = new TransformGroup();
+
+        // Apply flip transforms using ScaleTransform with center point
+        if (_flipX || _flipY)
+        {
+            double scaleX = _flipX ? -1 : 1;
+            double scaleY = _flipY ? -1 : 1;
+            transformGroup.Children.Add(new ScaleTransform(scaleX, scaleY, centerX, centerY));
+        }
+
+        // Apply rotation around center
+        if (Math.Abs(_viewRotation) >= 0.001)
+        {
+            transformGroup.Children.Add(new RotateTransform(_viewRotation, centerX, centerY));
+        }
+
+        dc.PushTransform(transformGroup);
+    }
+
+    private void RestoreViewTransform(DrawingContext dc)
+    {
+        if (!_flipX && !_flipY && Math.Abs(_viewRotation) < 0.001)
+            return;
+
+        dc.Pop();
     }
 
     private void RenderGrid(DrawingContext dc)
@@ -563,6 +676,14 @@ public class CadCanvas : FrameworkElement
         _renderService.RenderEntities(dc, selectedEntities, renderContext);
     }
 
+    /// <summary>
+    /// Gets the current viewport bounds in CAD coordinates.
+    /// </summary>
+    public Rect GetViewportBounds()
+    {
+        return CalculateViewportBounds();
+    }
+
     private Rect CalculateViewportBounds()
     {
         // Convert screen corners to CAD coordinates
@@ -645,6 +766,18 @@ public class CadCanvas : FrameworkElement
                 newSettings.PropertyChanged += canvas.OnGridSettingsPropertyChanged;
             }
 
+            canvas.Render();
+        }
+    }
+
+    private static void OnViewTransformChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas canvas)
+        {
+            canvas._flipX = canvas.FlipX;
+            canvas._flipY = canvas.FlipY;
+            canvas._viewRotation = canvas.ViewRotation;
+            canvas.InvalidateCache();
             canvas.Render();
         }
     }
