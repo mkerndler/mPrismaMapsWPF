@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly MainWindowViewModel _viewModel;
     private readonly ISelectionService _selectionService;
     private bool _isUpdatingLayerSelection;
+    private bool _isUpdatingEntitySelection;
 
     public MainWindow(MainWindowViewModel viewModel, ISelectionService selectionService)
     {
@@ -33,6 +34,7 @@ public partial class MainWindow : Window
         _viewModel.ResetViewTransformsRequested += OnResetViewTransformsRequested;
         _viewModel.RotateViewRequested += OnRotateViewRequested;
         _viewModel.DeleteOutsideViewportRequested += OnDeleteOutsideViewportRequested;
+        _viewModel.ZoomToEntityRequested += OnZoomToEntityRequested;
         _viewModel.LayerPanel.LayerVisibilityChanged += OnLayerVisibilityChanged;
         _viewModel.LayerPanel.DeleteLayerRequested += OnDeleteLayerRequested;
         _viewModel.LayerPanel.DeleteMultipleLayersRequested += OnDeleteMultipleLayersRequested;
@@ -258,8 +260,31 @@ public partial class MainWindow : Window
 
     private void OnEntitySelectionChanged(object? sender, Services.SelectionChangedEventArgs e)
     {
-        // When entities are selected, also select their corresponding layers
         var selectedEntities = _selectionService.SelectedEntities;
+
+        // Sync canvas selection to entity list
+        if (!_isUpdatingEntitySelection)
+        {
+            _isUpdatingEntitySelection = true;
+            try
+            {
+                EntityListBox.SelectedItems.Clear();
+                foreach (var entity in selectedEntities)
+                {
+                    EntityListBox.SelectedItems.Add(entity);
+                }
+
+                // Scroll the first selected item into view
+                if (selectedEntities.Count > 0)
+                {
+                    EntityListBox.ScrollIntoView(selectedEntities.First());
+                }
+            }
+            finally
+            {
+                _isUpdatingEntitySelection = false;
+            }
+        }
 
         if (selectedEntities.Count == 0)
         {
@@ -351,5 +376,145 @@ public partial class MainWindow : Window
     {
         e.ViewportBounds = CadCanvas.GetViewportBounds();
         e.Cancelled = false;
+    }
+
+    private void OnZoomToEntityRequested(object? sender, ZoomToEntityEventArgs e)
+    {
+        CadCanvas.ZoomToEntity(e.Entity);
+    }
+
+    private void EntityListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_isUpdatingEntitySelection)
+            return;
+
+        _isUpdatingEntitySelection = true;
+        try
+        {
+            // Sync entity list selection to canvas
+            var selectedEntities = EntityListBox.SelectedItems.Cast<EntityModel>().ToList();
+
+            // Update selection service
+            if (selectedEntities.Count == 0)
+            {
+                _selectionService.ClearSelection();
+            }
+            else
+            {
+                _selectionService.SelectMultiple(selectedEntities, addToSelection: false);
+            }
+
+            // Update canvas
+            var selectedHandles = selectedEntities.Select(e => e.Handle).ToList();
+            CadCanvas.SelectedHandles = selectedHandles;
+            CadCanvas.Render();
+        }
+        finally
+        {
+            _isUpdatingEntitySelection = false;
+        }
+    }
+
+    private void EntityListBox_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        // Zoom to the double-clicked entity
+        if (EntityListBox.SelectedItem is EntityModel entity)
+        {
+            _viewModel.ZoomToEntity(entity);
+        }
+    }
+
+    private void ZoomToEntity_Click(object sender, RoutedEventArgs e)
+    {
+        if (EntityListBox.SelectedItem is EntityModel entity)
+        {
+            _viewModel.ZoomToEntity(entity);
+        }
+    }
+
+    private void DeleteEntity_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.DeleteSelectedCommand.Execute(null);
+    }
+
+    private void ShowProperties_Click(object sender, RoutedEventArgs e)
+    {
+        // Scroll the properties panel into view - the properties panel is already bound to selection
+        // This is a no-op since properties are already shown, but could be used to scroll/focus
+    }
+
+    private void EntityTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (_isUpdatingEntitySelection)
+            return;
+
+        // Only handle entity selection, not group selection
+        if (e.NewValue is EntityModel entity)
+        {
+            _isUpdatingEntitySelection = true;
+            try
+            {
+                _selectionService.Select(entity);
+
+                var selectedHandles = new List<ulong> { entity.Handle };
+                CadCanvas.SelectedHandles = selectedHandles;
+                CadCanvas.Render();
+            }
+            finally
+            {
+                _isUpdatingEntitySelection = false;
+            }
+        }
+    }
+
+    private void EntityTreeView_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        // Zoom to the double-clicked entity
+        if (EntityTreeView.SelectedItem is EntityModel entity)
+        {
+            _viewModel.ZoomToEntity(entity);
+        }
+    }
+
+    private void TreeViewZoomToEntity_Click(object sender, RoutedEventArgs e)
+    {
+        // Get the entity from the context menu's data context
+        if (sender is MenuItem menuItem &&
+            menuItem.Parent is ContextMenu contextMenu &&
+            contextMenu.PlacementTarget is FrameworkElement element &&
+            element.DataContext is EntityModel entity)
+        {
+            _viewModel.ZoomToEntity(entity);
+        }
+        else if (EntityTreeView.SelectedItem is EntityModel selectedEntity)
+        {
+            _viewModel.ZoomToEntity(selectedEntity);
+        }
+    }
+
+    private void TreeViewDeleteEntity_Click(object sender, RoutedEventArgs e)
+    {
+        // Select the entity first if coming from context menu
+        if (sender is MenuItem menuItem &&
+            menuItem.Parent is ContextMenu contextMenu &&
+            contextMenu.PlacementTarget is FrameworkElement element &&
+            element.DataContext is EntityModel entity)
+        {
+            _selectionService.Select(entity);
+        }
+
+        _viewModel.DeleteSelectedCommand.Execute(null);
+    }
+
+    private void TreeViewShowProperties_Click(object sender, RoutedEventArgs e)
+    {
+        // Select the entity to show its properties
+        if (sender is MenuItem menuItem &&
+            menuItem.Parent is ContextMenu contextMenu &&
+            contextMenu.PlacementTarget is FrameworkElement element &&
+            element.DataContext is EntityModel entity)
+        {
+            _selectionService.Select(entity);
+        }
     }
 }

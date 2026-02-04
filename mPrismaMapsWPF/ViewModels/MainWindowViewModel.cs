@@ -35,6 +35,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         LayerPanel = new LayerPanelViewModel(_documentService, _undoRedoService);
         PropertiesPanel = new PropertiesPanelViewModel(_selectionService, _documentService, _undoRedoService);
+        EntityViewer = new EntityViewerViewModel(_selectionService);
 
         // Subscribe to layer visibility changes to update DeleteHiddenEntities command state
         LayerPanel.LayerVisibilityChanged += OnLayerVisibilityChangedForCommand;
@@ -47,6 +48,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     public LayerPanelViewModel LayerPanel { get; }
     public PropertiesPanelViewModel PropertiesPanel { get; }
+    public EntityViewerViewModel EntityViewer { get; }
 
     [ObservableProperty]
     private string _windowTitle = "mPrismaMaps - DWG Viewer";
@@ -134,6 +136,7 @@ public partial class MainWindowViewModel : ObservableObject
     public event EventHandler? ResetViewTransformsRequested;
     public event EventHandler<RotateViewEventArgs>? RotateViewRequested;
     public event EventHandler<DeleteOutsideViewportEventArgs>? DeleteOutsideViewportRequested;
+    public event EventHandler<ZoomToEntityEventArgs>? ZoomToEntityRequested;
 
     [RelayCommand]
     private async Task OpenFileAsync()
@@ -602,6 +605,9 @@ public partial class MainWindowViewModel : ObservableObject
             Entities.Add(new EntityModel(entity));
         }
 
+        // Update entity viewer
+        EntityViewer.SetEntities(Entities);
+
         // Update grid spacing based on document size
         UpdateGridSpacingFromExtents();
 
@@ -623,6 +629,7 @@ public partial class MainWindowViewModel : ObservableObject
         StatusText = "Ready";
         EntityCount = 0;
         Entities.Clear();
+        EntityViewer.SetEntities(Entities);
 
         SaveFileCommand.NotifyCanExecuteChanged();
         SaveFileAsCommand.NotifyCanExecuteChanged();
@@ -649,6 +656,7 @@ public partial class MainWindowViewModel : ObservableObject
             Entities.Add(new EntityModel(entity));
         }
         EntityCount = Entities.Count;
+        EntityViewer.Refresh();
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }
 
@@ -736,5 +744,29 @@ public partial class MainWindowViewModel : ObservableObject
             double autoSpacing = GridSnapSettings.CalculateAutoGridSpacing(maxDimension);
             GridSpacing = autoSpacing;
         }
+    }
+
+    /// <summary>
+    /// Requests the view to zoom to the specified entity.
+    /// </summary>
+    public void ZoomToEntity(EntityModel entity)
+    {
+        if (entity?.Entity != null)
+        {
+            ZoomToEntityRequested?.Invoke(this, new ZoomToEntityEventArgs(entity.Entity));
+        }
+    }
+}
+
+/// <summary>
+/// Event args for the ZoomToEntity request.
+/// </summary>
+public class ZoomToEntityEventArgs : EventArgs
+{
+    public Entity Entity { get; }
+
+    public ZoomToEntityEventArgs(Entity entity)
+    {
+        Entity = entity;
     }
 }

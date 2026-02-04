@@ -340,28 +340,199 @@
                 <ColumnDefinition Width="220" MinWidth="180"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Left Panel - Entity Tree -->
+            <!-- Left Panel - Entity Viewer -->
             <Border Grid.Column="0" Background="#FF252526" BorderBrush="#FF3C3C3C" BorderThickness="0,0,1,0">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Text="Entities" Style="{StaticResource PanelHeaderStyle}"/>
 
-                    <TreeView Grid.Row="1"
+                    <!-- Search Filter -->
+                    <TextBox Grid.Row="1"
+                             x:Name="EntityFilterTextBox"
+                             Text="{Binding EntityViewer.FilterText, UpdateSourceTrigger=PropertyChanged}"
+                             Background="#FF3C3C3C"
+                             Foreground="White"
+                             BorderBrush="#FF555555"
+                             Margin="8,0,8,4"
+                             Padding="4,2"
+                             Tag="Search entities...">
+                        <TextBox.Style>
+                            <Style TargetType="TextBox">
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="TextBox">
+                                            <Grid>
+                                                <Border Background="{TemplateBinding Background}"
+                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                        BorderThickness="{TemplateBinding BorderThickness}">
+                                                    <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                                                </Border>
+                                                <TextBlock Text="{TemplateBinding Tag}"
+                                                           Foreground="#FF888888"
+                                                           Margin="6,2,0,0"
+                                                           IsHitTestVisible="False"
+                                                           Visibility="{Binding Text.IsEmpty, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                            </Grid>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </TextBox.Style>
+                    </TextBox>
+
+                    <!-- Grouping Options -->
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="8,0,8,4">
+                        <TextBlock Text="Group:" Foreground="#FFCCCCCC" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                        <RadioButton Content="None" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"
+                                     IsChecked="{Binding EntityViewer.IsGroupByNone}"
+                                     GroupName="EntityGrouping"/>
+                        <RadioButton Content="Type" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"
+                                     IsChecked="{Binding EntityViewer.IsGroupByType}"
+                                     GroupName="EntityGrouping"/>
+                        <RadioButton Content="Layer" Foreground="White" VerticalAlignment="Center"
+                                     IsChecked="{Binding EntityViewer.IsGroupByLayer}"
+                                     GroupName="EntityGrouping"/>
+                    </StackPanel>
+
+                    <!-- Flat Entity List (when not grouped) -->
+                    <ListBox Grid.Row="3"
+                             x:Name="EntityListBox"
+                             ItemsSource="{Binding EntityViewer.FilteredEntities}"
+                             SelectionMode="Extended"
+                             SelectionChanged="EntityListBox_SelectionChanged"
+                             MouseDoubleClick="EntityListBox_MouseDoubleClick"
+                             Background="Transparent"
+                             Foreground="White"
+                             BorderThickness="0"
+                             Margin="4"
+                             VirtualizingStackPanel.IsVirtualizing="True"
+                             VirtualizingStackPanel.VirtualizationMode="Recycling"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             Visibility="{Binding EntityViewer.IsGroupByNone, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Padding" Value="4,2"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <Border x:Name="Border"
+                                                    Background="Transparent"
+                                                    BorderThickness="0"
+                                                    Padding="{TemplateBinding Padding}">
+                                                <ContentPresenter/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="Border" Property="Background" Value="#FF0078D4"/>
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Border" Property="Background" Value="#FF3C3C3C"/>
+                                                </Trigger>
+                                                <MultiTrigger>
+                                                    <MultiTrigger.Conditions>
+                                                        <Condition Property="IsSelected" Value="True"/>
+                                                        <Condition Property="IsMouseOver" Value="True"/>
+                                                    </MultiTrigger.Conditions>
+                                                    <Setter TargetName="Border" Property="Background" Value="#FF1E90FF"/>
+                                                </MultiTrigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding TypeIcon}" Foreground="#FF888888" Width="16" FontFamily="Consolas"/>
+                                    <TextBlock Text="{Binding DisplayName}" Foreground="White"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                        <ListBox.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Zoom to Entity" Click="ZoomToEntity_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Delete" InputGestureText="Del" Click="DeleteEntity_Click"/>
+                                <Separator/>
+                                <MenuItem Header="Properties" Click="ShowProperties_Click"/>
+                            </ContextMenu>
+                        </ListBox.ContextMenu>
+                    </ListBox>
+
+                    <!-- Grouped Entity Tree (when grouped) -->
+                    <TreeView Grid.Row="3"
+                              x:Name="EntityTreeView"
+                              ItemsSource="{Binding EntityViewer.GroupedEntities}"
                               Background="Transparent"
                               Foreground="White"
                               BorderThickness="0"
-                              ItemsSource="{Binding Entities}"
-                              Margin="4">
+                              Margin="4"
+                              VirtualizingStackPanel.IsVirtualizing="True"
+                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                              SelectedItemChanged="EntityTreeView_SelectedItemChanged"
+                              MouseDoubleClick="EntityTreeView_MouseDoubleClick"
+                              Visibility="{Binding EntityViewer.IsGroupByNone, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}">
+                        <TreeView.ItemContainerStyle>
+                            <Style TargetType="TreeViewItem">
+                                <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Style>
+                        </TreeView.ItemContainerStyle>
                         <TreeView.ItemTemplate>
-                            <HierarchicalDataTemplate>
-                                <TextBlock Text="{Binding DisplayName}" Foreground="White"/>
+                            <HierarchicalDataTemplate ItemsSource="{Binding Entities}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Name}" Foreground="White" FontWeight="SemiBold"/>
+                                    <TextBlock Text=" (" Foreground="#FF888888"/>
+                                    <TextBlock Text="{Binding Count}" Foreground="#FF888888"/>
+                                    <TextBlock Text=")" Foreground="#FF888888"/>
+                                </StackPanel>
+                                <HierarchicalDataTemplate.ItemContainerStyle>
+                                    <Style TargetType="TreeViewItem">
+                                        <Setter Property="Foreground" Value="White"/>
+                                    </Style>
+                                </HierarchicalDataTemplate.ItemContainerStyle>
+                                <HierarchicalDataTemplate.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <StackPanel.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Zoom to Entity" Click="TreeViewZoomToEntity_Click"/>
+                                                    <Separator/>
+                                                    <MenuItem Header="Delete" InputGestureText="Del" Click="TreeViewDeleteEntity_Click"/>
+                                                    <Separator/>
+                                                    <MenuItem Header="Properties" Click="TreeViewShowProperties_Click"/>
+                                                </ContextMenu>
+                                            </StackPanel.ContextMenu>
+                                            <TextBlock Text="{Binding TypeIcon}" Foreground="#FF888888" Width="16" FontFamily="Consolas"/>
+                                            <TextBlock Text="{Binding DisplayName}" Foreground="White"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </HierarchicalDataTemplate.ItemTemplate>
                             </HierarchicalDataTemplate>
                         </TreeView.ItemTemplate>
                     </TreeView>
+
+                    <!-- Entity Count Status -->
+                    <TextBlock Grid.Row="4"
+                               Margin="8,4"
+                               FontSize="10"
+                               Foreground="#FF888888">
+                        <Run Text="{Binding EntityViewer.TotalCount, Mode=OneWay}"/>
+                        <Run Text=" entities"/>
+                        <Run Text=" ("/>
+                        <Run Text="{Binding EntityViewer.SelectedCount, Mode=OneWay}"/>
+                        <Run Text=" selected)"/>
+                    </TextBlock>
                 </Grid>
             </Border>
 

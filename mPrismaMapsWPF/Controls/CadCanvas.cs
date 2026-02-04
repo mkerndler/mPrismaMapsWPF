@@ -287,6 +287,60 @@ public class CadCanvas : FrameworkElement
         ZoomAtPoint(center, 1.0 / 1.25);
     }
 
+    /// <summary>
+    /// Zooms to fit the specified entity in the view.
+    /// </summary>
+    public void ZoomToEntity(Entity entity)
+    {
+        if (entity == null || ActualWidth <= 0 || ActualHeight <= 0)
+            return;
+
+        var entityExtents = new Extents();
+        entityExtents.Expand(entity);
+
+        if (!entityExtents.IsValid)
+            return;
+
+        ZoomToRect(entityExtents.MinX, entityExtents.MinY, entityExtents.MaxX, entityExtents.MaxY);
+    }
+
+    /// <summary>
+    /// Zooms to fit the specified rectangle (in CAD coordinates) in the view.
+    /// </summary>
+    public void ZoomToRect(double minX, double minY, double maxX, double maxY)
+    {
+        if (ActualWidth <= 0 || ActualHeight <= 0)
+            return;
+
+        double width = maxX - minX;
+        double height = maxY - minY;
+        double centerX = (minX + maxX) / 2;
+        double centerY = (minY + maxY) / 2;
+
+        // Ensure minimum size for points or very small entities
+        if (width < 1) width = 100;
+        if (height < 1) height = 100;
+
+        double margin = 50;
+        double availableWidth = ActualWidth - margin * 2;
+        double availableHeight = ActualHeight - margin * 2;
+
+        double scaleX = availableWidth / width;
+        double scaleY = availableHeight / height;
+        _scale = Math.Min(scaleX, scaleY);
+
+        // Limit max zoom to prevent excessive zooming on small entities
+        _scale = Math.Min(_scale, 50);
+
+        _offset = new WpfPoint(
+            -centerX + (ActualWidth / 2) / _scale,
+            centerY + (ActualHeight / 2) / _scale
+        );
+
+        InvalidateCache();
+        Render();
+    }
+
     public WpfPoint ScreenToCad(WpfPoint screenPoint)
     {
         return new WpfPoint(

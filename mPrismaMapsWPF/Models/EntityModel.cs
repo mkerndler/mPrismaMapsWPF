@@ -21,6 +21,34 @@ public partial class EntityModel : ObservableObject
 
     public string DisplayName => $"{TypeName} ({Handle:X})";
 
+    /// <summary>
+    /// Gets a Unicode icon representing the entity type.
+    /// </summary>
+    public string TypeIcon => GetTypeIcon();
+
+    private string GetTypeIcon()
+    {
+        // Arc must come before Circle since Arc inherits from Circle
+        return Entity switch
+        {
+            Line => "/",
+            Arc => "◜",
+            Circle => "○",
+            LwPolyline => "∿",
+            Polyline2D => "∿",
+            Polyline3D => "∿",
+            TextEntity => "A",
+            MText => "A",
+            Point => "•",
+            Ellipse => "⬭",
+            Spline => "~",
+            Hatch => "▧",
+            Insert => "⊞",
+            _ when TypeName.Contains("Dimension") => "↔",
+            _ => "◇"
+        };
+    }
+
     public string? GetProperty(string propertyName)
     {
         return propertyName switch
