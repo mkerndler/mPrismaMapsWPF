@@ -188,7 +188,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            var entityModel = _viewModel.Entities.FirstOrDefault(em => em.Entity == e.Entity);
+            var entityModel = _viewModel.GetEntityModel(e.Entity);
             if (entityModel != null)
             {
                 if (e.AddToSelection)

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Services;
@@ -22,9 +23,16 @@ public enum EntityGroupingMode
 public partial class EntityViewerViewModel : ObservableObject
 {
     private readonly ISelectionService _selectionService;
+    private readonly DispatcherTimer _filterDebounceTimer;
     private ObservableCollection<EntityModel> _allEntities;
     private string _filterText = string.Empty;
     private EntityGroupingMode _groupingMode = EntityGroupingMode.None;
+
+    /// <summary>
+    /// When true, suppresses automatic refresh on CollectionChanged events.
+    /// Set this during bulk entity loading to avoid O(N^2) notification storms.
+    /// </summary>
+    public bool SuppressRefresh { get; set; }
 
     public EntityViewerViewModel(ISelectionService selectionService)
     {
@@ -32,6 +40,16 @@ public partial class EntityViewerViewModel : ObservableObject
         _allEntities = new ObservableCollection<EntityModel>();
         FilteredEntities = new ObservableCollection<EntityModel>();
         GroupedEntities = new ObservableCollection<EntityGroupModel>();
+
+        _filterDebounceTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(300)
+        };
+        _filterDebounceTimer.Tick += (_, _) =>
+        {
+            _filterDebounceTimer.Stop();
+            ApplyFilter();
+        };
 
         _selectionService.SelectionChanged += OnSelectionChanged;
     }
@@ -46,7 +64,9 @@ public partial class EntityViewerViewModel : ObservableObject
         {
             if (SetProperty(ref _filterText, value))
             {
-                ApplyFilter();
+                // Debounce filter to avoid rebuilding on every keystroke
+                _filterDebounceTimer.Stop();
+                _filterDebounceTimer.Start();
             }
         }
     }
@@ -152,6 +172,9 @@ public partial class EntityViewerViewModel : ObservableObject
 
     private void OnEntitiesCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
+        if (SuppressRefresh)
+            return;
+
         TotalCount = _allEntities?.Count ?? 0;
         ApplyFilter();
     }

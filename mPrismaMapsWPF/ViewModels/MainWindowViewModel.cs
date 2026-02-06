@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using mPrismaMapsWPF.Commands;
 using mPrismaMapsWPF.Drawing;
+using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Services;
 using WpfPoint = System.Windows.Point;
@@ -124,7 +125,16 @@ public partial class MainWindowViewModel : ObservableObject
     private double _viewRotation;
 
     public ObservableCollection<EntityModel> Entities { get; } = new();
+    private Dictionary<Entity, EntityModel> _entityLookup = new();
     public CadDocumentModel Document => _documentService.CurrentDocument;
+
+    /// <summary>
+    /// O(1) lookup of EntityModel by Entity reference. Returns null if not found.
+    /// </summary>
+    public EntityModel? GetEntityModel(Entity entity)
+    {
+        return _entityLookup.TryGetValue(entity, out var model) ? model : null;
+    }
 
     public IUndoRedoService UndoRedoService => _undoRedoService;
 
@@ -525,6 +535,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         foreach (var entityModel in selectedEntities)
         {
+            _entityLookup.Remove(entityModel.Entity);
             Entities.Remove(entityModel);
         }
 
@@ -599,11 +610,25 @@ public partial class MainWindowViewModel : ObservableObject
         StatusText = $"Loaded {e.EntityCount:N0} entities";
         EntityCount = e.EntityCount;
 
+        // Invalidate bounding box cache for new document
+        BoundingBoxHelper.InvalidateCache();
+
+        // Build entity models in a batch
+        var models = _documentService.CurrentDocument.ModelSpaceEntities
+            .Select(ent => new EntityModel(ent))
+            .ToList();
+
+        // Build lookup dictionary
+        _entityLookup = new Dictionary<Entity, EntityModel>(models.Count);
+        foreach (var model in models)
+            _entityLookup[model.Entity] = model;
+
+        // Suppress EntityViewer refresh during bulk load
+        EntityViewer.SuppressRefresh = true;
         Entities.Clear();
-        foreach (var entity in _documentService.CurrentDocument.ModelSpaceEntities)
-        {
-            Entities.Add(new EntityModel(entity));
-        }
+        foreach (var model in models)
+            Entities.Add(model);
+        EntityViewer.SuppressRefresh = false;
 
         // Update entity viewer
         EntityViewer.SetEntities(Entities);
@@ -629,6 +654,8 @@ public partial class MainWindowViewModel : ObservableObject
         StatusText = "Ready";
         EntityCount = 0;
         Entities.Clear();
+        _entityLookup.Clear();
+        BoundingBoxHelper.InvalidateCache();
         EntityViewer.SetEntities(Entities);
 
         SaveFileCommand.NotifyCanExecuteChanged();
@@ -650,11 +677,22 @@ public partial class MainWindowViewModel : ObservableObject
     /// </summary>
     public void RefreshEntities()
     {
+        BoundingBoxHelper.InvalidateCache();
+
+        var models = _documentService.CurrentDocument.ModelSpaceEntities
+            .Select(ent => new EntityModel(ent))
+            .ToList();
+
+        _entityLookup = new Dictionary<Entity, EntityModel>(models.Count);
+        foreach (var model in models)
+            _entityLookup[model.Entity] = model;
+
+        EntityViewer.SuppressRefresh = true;
         Entities.Clear();
-        foreach (var entity in _documentService.CurrentDocument.ModelSpaceEntities)
-        {
-            Entities.Add(new EntityModel(entity));
-        }
+        foreach (var model in models)
+            Entities.Add(model);
+        EntityViewer.SuppressRefresh = false;
+
         EntityCount = Entities.Count;
         EntityViewer.Refresh();
         RenderRequested?.Invoke(this, EventArgs.Empty);
@@ -717,8 +755,10 @@ public partial class MainWindowViewModel : ObservableObject
             var command = new AddEntityCommand(_documentService.CurrentDocument, entity);
             _undoRedoService.Execute(command);
 
-            // Add to entities collection
-            Entities.Add(new EntityModel(entity));
+            // Add to entities collection and lookup
+            var entityModel = new EntityModel(entity);
+            _entityLookup[entity] = entityModel;
+            Entities.Add(entityModel);
             EntityCount = Entities.Count;
 
             StatusText = $"Created {entity.GetType().Name} on layer '{CadDocumentModel.UserDrawingsLayerName}'";

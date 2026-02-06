@@ -38,6 +38,18 @@ public class CadCanvas : FrameworkElement
     private HashSet<ulong>? _cachedSelectedHandles;
     private HashSet<string>? _cachedHiddenLayers;
 
+    // Spatial index for hit testing
+    private SpatialGrid? _spatialGrid;
+
+    // Handle -> Entity lookup for fast selection overlay rendering
+    private Dictionary<ulong, Entity>? _entityByHandle;
+
+    // Cached selected handles HashSet (rebuilt only when SelectedHandles property changes)
+    private HashSet<ulong> _selectedHandlesSet = new();
+
+    // Cached viewport bounds per frame
+    private Rect? _frameViewportBounds;
+
     // Drawing support
     private IDrawingTool? _currentTool;
     private WpfPoint _currentCadPoint;
@@ -413,6 +425,9 @@ public class CadCanvas : FrameworkElement
         if (entities == null || ActualWidth <= 0 || ActualHeight <= 0)
             return;
 
+        // Cache viewport bounds for this frame to avoid recalculating multiple times
+        _frameViewportBounds = CalculateViewportBounds();
+
         int width = (int)ActualWidth;
         int height = (int)ActualHeight;
 
@@ -505,7 +520,7 @@ public class CadCanvas : FrameworkElement
         if (GridSettings == null || !GridSettings.ShowGrid)
             return;
 
-        var viewport = CalculateViewportBounds();
+        var viewport = _frameViewportBounds ?? CalculateViewportBounds();
         double spacingX = GridSettings.SpacingX;
         double spacingY = GridSettings.SpacingY;
 
@@ -594,10 +609,9 @@ public class CadCanvas : FrameworkElement
 
     private bool SelectionMatchesCache()
     {
-        var currentHandles = SelectedHandles?.ToHashSet() ?? new HashSet<ulong>();
         if (_cachedSelectedHandles == null)
-            return currentHandles.Count == 0;
-        return _cachedSelectedHandles.SetEquals(currentHandles);
+            return _selectedHandlesSet.Count == 0;
+        return _cachedSelectedHandles.SetEquals(_selectedHandlesSet);
     }
 
     private bool HiddenLayersMatchCache()
@@ -633,7 +647,7 @@ public class CadCanvas : FrameworkElement
                 DefaultColor = Colors.White,
                 LineThickness = 1.0,
                 ShowSelection = false, // Don't show selection in cache
-                ViewportBounds = CalculateViewportBounds()
+                ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds()
             };
 
             if (HiddenLayers != null)
@@ -656,7 +670,7 @@ public class CadCanvas : FrameworkElement
         _cachedWidth = width;
         _cachedHeight = height;
         _cachedHiddenLayers = HiddenLayers?.ToHashSet() ?? new HashSet<string>();
-        _cachedSelectedHandles = SelectedHandles?.ToHashSet() ?? new HashSet<ulong>();
+        _cachedSelectedHandles = new HashSet<ulong>(_selectedHandlesSet);
         _cacheValid = true;
     }
 
@@ -692,15 +706,13 @@ public class CadCanvas : FrameworkElement
         RenderSelectionOverlay(dc, entities);
 
         // Update cached selection
-        _cachedSelectedHandles = SelectedHandles?.ToHashSet() ?? new HashSet<ulong>();
+        _cachedSelectedHandles = new HashSet<ulong>(_selectedHandlesSet);
     }
 
     private void RenderSelectionOverlay(DrawingContext dc, IEnumerable<Entity> entities)
     {
-        if (SelectedHandles == null || !SelectedHandles.Any())
+        if (_selectedHandlesSet.Count == 0)
             return;
-
-        var selectedSet = SelectedHandles.ToHashSet();
 
         var renderContext = new RenderContext
         {
@@ -709,10 +721,10 @@ public class CadCanvas : FrameworkElement
             DefaultColor = Colors.White,
             LineThickness = 1.0,
             ShowSelection = true,
-            ViewportBounds = CalculateViewportBounds()
+            ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds()
         };
 
-        foreach (var handle in selectedSet)
+        foreach (var handle in _selectedHandlesSet)
         {
             renderContext.SelectedHandles.Add(handle);
         }
@@ -725,9 +737,23 @@ public class CadCanvas : FrameworkElement
             }
         }
 
-        // Only render selected entities
-        var selectedEntities = entities.Where(e => selectedSet.Contains(e.Handle));
-        _renderService.RenderEntities(dc, selectedEntities, renderContext);
+        // Use handle->entity dictionary for O(1) lookup per selected handle
+        if (_entityByHandle != null)
+        {
+            var selectedEntities = new List<Entity>(_selectedHandlesSet.Count);
+            foreach (var handle in _selectedHandlesSet)
+            {
+                if (_entityByHandle.TryGetValue(handle, out var entity))
+                    selectedEntities.Add(entity);
+            }
+            _renderService.RenderEntities(dc, selectedEntities, renderContext);
+        }
+        else
+        {
+            // Fallback: linear scan
+            var selectedEntities = entities.Where(e => _selectedHandlesSet.Contains(e.Handle));
+            _renderService.RenderEntities(dc, selectedEntities, renderContext);
+        }
     }
 
     /// <summary>
@@ -767,6 +793,7 @@ public class CadCanvas : FrameworkElement
         if (d is CadCanvas canvas)
         {
             canvas.CalculateExtents();
+            canvas.RebuildSpatialIndex();
             canvas.InvalidateCache(); // Entities changed - full cache rebuild needed
             canvas.Render();
         }
@@ -776,6 +803,8 @@ public class CadCanvas : FrameworkElement
     {
         if (d is CadCanvas canvas)
         {
+            // Rebuild the cached selected handles hashset
+            canvas._selectedHandlesSet = canvas.SelectedHandles?.ToHashSet() ?? new HashSet<ulong>();
             // Selection changes don't invalidate cache - we render selection as overlay
             canvas.Render();
         }
@@ -894,6 +923,54 @@ public class CadCanvas : FrameworkElement
         }
     }
 
+    private void RebuildSpatialIndex()
+    {
+        var entities = Entities;
+        if (entities == null)
+        {
+            _spatialGrid = null;
+            _entityByHandle = null;
+            return;
+        }
+
+        var entityList = entities.ToList();
+
+        // Build handle -> entity dictionary
+        _entityByHandle = new Dictionary<ulong, Entity>(entityList.Count);
+        foreach (var entity in entityList)
+        {
+            _entityByHandle[entity.Handle] = entity;
+        }
+
+        // Compute grid extents from BoundingBoxHelper (same source as spatial grid insertion)
+        double minX = double.MaxValue, minY = double.MaxValue;
+        double maxX = double.MinValue, maxY = double.MinValue;
+        bool hasBounds = false;
+
+        foreach (var entity in entityList)
+        {
+            var bounds = BoundingBoxHelper.GetBounds(entity);
+            if (bounds.HasValue)
+            {
+                hasBounds = true;
+                minX = Math.Min(minX, bounds.Value.Left);
+                minY = Math.Min(minY, bounds.Value.Top);
+                maxX = Math.Max(maxX, bounds.Value.Right);
+                maxY = Math.Max(maxY, bounds.Value.Bottom);
+            }
+        }
+
+        if (hasBounds && maxX > minX && maxY > minY)
+        {
+            var rect = new Rect(minX, minY, maxX - minX, maxY - minY);
+            _spatialGrid = SpatialGrid.Build(entityList, rect);
+        }
+        else
+        {
+            _spatialGrid = null;
+        }
+    }
+
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
         if (_currentTool != null)
@@ -932,12 +1009,12 @@ public class CadCanvas : FrameworkElement
         Focus();
 
         var screenPoint = e.GetPosition(this);
-        var cadPoint = GetSnappedCadPoint(screenPoint);
 
-        // Handle drawing mode
+        // Handle drawing mode - use snapped point for precise drawing
         if (_currentTool != null && DrawingMode != DrawingMode.Select && DrawingMode != DrawingMode.Pan)
         {
-            _currentTool.OnMouseDown(cadPoint, MouseButton.Left);
+            var snappedPoint = GetSnappedCadPoint(screenPoint);
+            _currentTool.OnMouseDown(snappedPoint, MouseButton.Left);
             Render();
             return;
         }
@@ -948,20 +1025,39 @@ public class CadCanvas : FrameworkElement
             return;
         }
 
-        // Selection mode
+        // Selection mode - use raw (unsnapped) point for accurate hit testing
+        var cadPoint = ScreenToCad(screenPoint);
+
         var entities = Entities;
         if (entities == null)
             return;
 
         double tolerance = 5.0 / _scale;
 
+        // Use spatial grid for fast hit testing when available
         Entity? hitEntity = null;
-        foreach (var entity in entities)
+        if (_spatialGrid != null)
         {
-            if (HitTestHelper.HitTest(entity, cadPoint, tolerance))
+            var candidates = _spatialGrid.Query(cadPoint, tolerance);
+            foreach (var entity in candidates)
             {
-                hitEntity = entity;
-                break;
+                if (HitTestHelper.HitTest(entity, cadPoint, tolerance))
+                {
+                    hitEntity = entity;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            // Fallback: linear scan
+            foreach (var entity in entities)
+            {
+                if (HitTestHelper.HitTest(entity, cadPoint, tolerance))
+                {
+                    hitEntity = entity;
+                    break;
+                }
             }
         }
 

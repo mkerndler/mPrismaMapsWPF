@@ -6,10 +6,15 @@ namespace mPrismaMapsWPF.Helpers;
 
 public static class BoundingBoxHelper
 {
+    private static readonly Dictionary<ulong, Rect?> _boundsCache = new();
+
     public static Rect? GetBounds(Entity entity)
     {
+        if (_boundsCache.TryGetValue(entity.Handle, out var cached))
+            return cached;
+
         // Note: Arc inherits from Circle, so check Arc first
-        return entity switch
+        var bounds = entity switch
         {
             Line line => GetLineBounds(line),
             Arc arc => GetArcBounds(arc),
@@ -23,6 +28,19 @@ public static class BoundingBoxHelper
             Point point => GetPointBounds(point),
             _ => null
         };
+
+        _boundsCache[entity.Handle] = bounds;
+        return bounds;
+    }
+
+    public static void InvalidateCache()
+    {
+        _boundsCache.Clear();
+    }
+
+    public static void InvalidateEntity(ulong handle)
+    {
+        _boundsCache.Remove(handle);
     }
 
     private static Rect GetLineBounds(Line line)
