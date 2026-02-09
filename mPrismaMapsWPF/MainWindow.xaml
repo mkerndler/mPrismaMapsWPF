@@ -88,20 +88,6 @@
             <Setter Property="Margin" Value="8,8,8,4"/>
         </Style>
 
-        <!-- Dark theme style for all menu items including submenus -->
-        <Style TargetType="MenuItem">
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="Background" Value="#FF2D2D2D"/>
-        </Style>
-
-        <Style TargetType="ContextMenu">
-            <Setter Property="Background" Value="#FF2D2D2D"/>
-            <Setter Property="Foreground" Value="White"/>
-        </Style>
-
-        <Style TargetType="Separator">
-            <Setter Property="Background" Value="#FF555555"/>
-        </Style>
     </Window.Resources>
 
     <Window.InputBindings>
@@ -139,12 +125,6 @@
 
         <!-- Menu Bar -->
         <Menu Grid.Row="0" Background="#FF2D2D2D" Foreground="White">
-            <Menu.ItemContainerStyle>
-                <Style TargetType="MenuItem">
-                    <Setter Property="Foreground" Value="White"/>
-                    <Setter Property="Background" Value="Transparent"/>
-                </Style>
-            </Menu.ItemContainerStyle>
             <MenuItem Header="_File">
                 <MenuItem Header="_Open..." Command="{Binding OpenFileCommand}" InputGestureText="Ctrl+O"/>
                 <MenuItem Header="_Save" Command="{Binding SaveFileCommand}" InputGestureText="Ctrl+S"/>
