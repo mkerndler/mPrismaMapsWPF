@@ -43,9 +43,13 @@ public partial class MainWindow : Window
         _viewModel.UndoRedoService.StateChanged += OnUndoRedoStateChanged;
         _selectionService.SelectionChanged += OnEntitySelectionChanged;
 
+        _viewModel.ZoomToAreaRequested += OnZoomToAreaRequested;
+
         CadCanvas.CadMouseMove += OnCadMouseMove;
         CadCanvas.EntityClicked += OnEntityClicked;
         CadCanvas.DrawingCompleted += OnDrawingCompleted;
+        CadCanvas.MarqueeSelectionCompleted += OnMarqueeSelectionCompleted;
+        CadCanvas.MoveCompleted += OnMoveCompleted;
 
         // Set up drawing mode binding
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
@@ -209,6 +213,44 @@ public partial class MainWindow : Window
         CadCanvas.Render();
     }
 
+    private void OnZoomToAreaRequested(object? sender, ZoomToAreaEventArgs e)
+    {
+        CadCanvas.ZoomToRect(e.MinX, e.MinY, e.MaxX, e.MaxY);
+    }
+
+    private void OnMarqueeSelectionCompleted(object? sender, MarqueeSelectionEventArgs e)
+    {
+        var entityModels = new List<EntityModel>();
+        foreach (var entity in e.SelectedEntities)
+        {
+            var model = _viewModel.GetEntityModel(entity);
+            if (model != null)
+                entityModels.Add(model);
+        }
+
+        if (entityModels.Count > 0)
+        {
+            _selectionService.SelectMultiple(entityModels, e.AddToSelection);
+        }
+        else if (!e.AddToSelection)
+        {
+            _selectionService.ClearSelection();
+        }
+
+        var selectedHandles = _selectionService.SelectedEntities
+            .Select(em => em.Handle)
+            .ToList();
+        CadCanvas.SelectedHandles = selectedHandles;
+        CadCanvas.Render();
+    }
+
+    private void OnMoveCompleted(object? sender, MoveCompletedEventArgs e)
+    {
+        _viewModel.OnMoveCompleted(e);
+        UpdateCanvasBindings();
+        CadCanvas.RebuildSpatialIndex();
+    }
+
     private void OnEntitiesChanged(object? sender, EventArgs e)
     {
         UpdateCanvasBindings();
@@ -247,6 +289,7 @@ public partial class MainWindow : Window
         _viewModel.RefreshEntities();
         _viewModel.LayerPanel.RefreshLayers();
         UpdateDeleteByTypeMenu();
+        CadCanvas.RebuildSpatialIndex();
     }
 
     private void LayersListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)

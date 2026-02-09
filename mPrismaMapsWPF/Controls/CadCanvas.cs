@@ -54,6 +54,16 @@ public class CadCanvas : FrameworkElement
     private IDrawingTool? _currentTool;
     private WpfPoint _currentCadPoint;
 
+    // Marquee selection state
+    private bool _isMarqueeSelecting;
+    private WpfPoint _marqueeStartScreen;
+    private WpfPoint _marqueeCurrentScreen;
+
+    // Move drag state
+    private bool _isMoving;
+    private WpfPoint _moveStartCadPoint;
+    private WpfPoint _moveCurrentCadPoint;
+
     // Grid rendering
     private static readonly Pen GridPenMinor = CreateGridPen(Color.FromArgb(40, 128, 128, 128));
     private static readonly Pen GridPenMajor = CreateGridPen(Color.FromArgb(80, 128, 128, 128));
@@ -225,6 +235,8 @@ public class CadCanvas : FrameworkElement
     public event EventHandler<CadMouseEventArgs>? CadMouseMove;
     public event EventHandler<CadEntityClickEventArgs>? EntityClicked;
     public event EventHandler<DrawingCompletedEventArgs>? DrawingCompleted;
+    public event EventHandler<MarqueeSelectionEventArgs>? MarqueeSelectionCompleted;
+    public event EventHandler<MoveCompletedEventArgs>? MoveCompleted;
 
     public double Scale
     {
@@ -477,6 +489,12 @@ public class CadCanvas : FrameworkElement
         // Draw drawing preview
         RenderDrawingPreview(dc);
 
+        // Draw marquee selection rectangle
+        RenderMarqueePreview(dc);
+
+        // Draw move preview (ghost of selected entities)
+        RenderMovePreview(dc, entities);
+
         RestoreViewTransform(dc);
     }
 
@@ -597,6 +615,83 @@ public class CadCanvas : FrameworkElement
         {
             dc.DrawEllipse(pointBrush, null, point, 4, 4);
         }
+    }
+
+    private void RenderMarqueePreview(DrawingContext dc)
+    {
+        if (!_isMarqueeSelecting)
+            return;
+
+        double x = Math.Min(_marqueeStartScreen.X, _marqueeCurrentScreen.X);
+        double y = Math.Min(_marqueeStartScreen.Y, _marqueeCurrentScreen.Y);
+        double w = Math.Abs(_marqueeCurrentScreen.X - _marqueeStartScreen.X);
+        double h = Math.Abs(_marqueeCurrentScreen.Y - _marqueeStartScreen.Y);
+
+        if (w < 1 && h < 1)
+            return;
+
+        var rect = new Rect(x, y, w, h);
+
+        // Left-to-right = window (solid cyan), right-to-left = crossing (dashed green with fill)
+        bool isWindow = _marqueeCurrentScreen.X >= _marqueeStartScreen.X;
+
+        if (isWindow)
+        {
+            var pen = new Pen(Brushes.Cyan, 1.0);
+            pen.Freeze();
+            dc.DrawRectangle(null, pen, rect);
+        }
+        else
+        {
+            var pen = new Pen(Brushes.LimeGreen, 1.0) { DashStyle = DashStyles.Dash };
+            pen.Freeze();
+            var fill = new SolidColorBrush(Color.FromArgb(30, 0, 255, 0));
+            fill.Freeze();
+            dc.DrawRectangle(fill, pen, rect);
+        }
+    }
+
+    private void RenderMovePreview(DrawingContext dc, IEnumerable<Entity> entities)
+    {
+        if (!_isMoving || _selectedHandlesSet.Count == 0)
+            return;
+
+        // Calculate screen-space delta
+        var startScreen = CadToScreen(_moveStartCadPoint.X, _moveStartCadPoint.Y);
+        var currentScreen = CadToScreen(_moveCurrentCadPoint.X, _moveCurrentCadPoint.Y);
+        double screenDx = currentScreen.X - startScreen.X;
+        double screenDy = currentScreen.Y - startScreen.Y;
+
+        if (Math.Abs(screenDx) < 0.5 && Math.Abs(screenDy) < 0.5)
+            return;
+
+        // Render selected entities translated as a ghost
+        dc.PushTransform(new TranslateTransform(screenDx, screenDy));
+        dc.PushOpacity(0.5);
+
+        var renderContext = new RenderContext
+        {
+            Scale = _scale,
+            Offset = _offset,
+            DefaultColor = Colors.Cyan,
+            LineThickness = 1.0,
+            ShowSelection = false,
+            ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds()
+        };
+
+        if (_entityByHandle != null)
+        {
+            var selectedEntities = new List<Entity>(_selectedHandlesSet.Count);
+            foreach (var handle in _selectedHandlesSet)
+            {
+                if (_entityByHandle.TryGetValue(handle, out var entity))
+                    selectedEntities.Add(entity);
+            }
+            _renderService.RenderEntities(dc, selectedEntities, renderContext);
+        }
+
+        dc.Pop(); // opacity
+        dc.Pop(); // transform
     }
 
     private WpfPoint CadToScreen(double cadX, double cadY)
@@ -877,6 +972,7 @@ public class CadCanvas : FrameworkElement
             DrawingMode.DrawLine => new LineTool(),
             DrawingMode.DrawPolyline => new PolylineTool(),
             DrawingMode.DrawPolygon => new PolygonTool(),
+            DrawingMode.ZoomToArea => new ZoomAreaTool(),
             _ => null
         };
 
@@ -902,7 +998,7 @@ public class CadCanvas : FrameworkElement
         Cursor = DrawingMode switch
         {
             DrawingMode.Pan => Cursors.Hand,
-            DrawingMode.DrawLine or DrawingMode.DrawPolyline or DrawingMode.DrawPolygon => Cursors.Cross,
+            DrawingMode.DrawLine or DrawingMode.DrawPolyline or DrawingMode.DrawPolygon or DrawingMode.ZoomToArea => Cursors.Cross,
             _ => Cursors.Arrow
         };
     }
@@ -923,7 +1019,7 @@ public class CadCanvas : FrameworkElement
         }
     }
 
-    private void RebuildSpatialIndex()
+    public void RebuildSpatialIndex()
     {
         var entities = Entities;
         if (entities == null)
@@ -973,6 +1069,27 @@ public class CadCanvas : FrameworkElement
 
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
+        if (e.Key == Key.Escape)
+        {
+            if (_isMarqueeSelecting)
+            {
+                _isMarqueeSelecting = false;
+                ReleaseMouseCapture();
+                Render();
+                e.Handled = true;
+                return;
+            }
+
+            if (_isMoving)
+            {
+                _isMoving = false;
+                ReleaseMouseCapture();
+                Render();
+                e.Handled = true;
+                return;
+            }
+        }
+
         if (_currentTool != null)
         {
             _currentTool.OnKeyDown(e.Key);
@@ -1062,7 +1179,33 @@ public class CadCanvas : FrameworkElement
         }
 
         bool addToSelection = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
-        EntityClicked?.Invoke(this, new CadEntityClickEventArgs(hitEntity, addToSelection));
+
+        if (hitEntity != null && _selectedHandlesSet.Contains(hitEntity.Handle))
+        {
+            // Hit on already-selected entity → start move drag
+            _isMoving = true;
+            _moveStartCadPoint = cadPoint;
+            _moveCurrentCadPoint = cadPoint;
+            CaptureMouse();
+        }
+        else if (hitEntity != null)
+        {
+            // Hit on unselected entity → select it (existing behavior)
+            EntityClicked?.Invoke(this, new CadEntityClickEventArgs(hitEntity, addToSelection));
+        }
+        else
+        {
+            // No hit → start marquee selection (or clear selection if no drag)
+            if (!addToSelection)
+            {
+                // Immediately fire click with null entity to clear selection
+                // (will be overridden by marquee if user drags)
+            }
+            _isMarqueeSelecting = true;
+            _marqueeStartScreen = screenPoint;
+            _marqueeCurrentScreen = screenPoint;
+            CaptureMouse();
+        }
     }
 
     private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -1070,6 +1213,29 @@ public class CadCanvas : FrameworkElement
         if (_isPanning && IsPanMode)
         {
             EndPan();
+            return;
+        }
+
+        // Forward to drawing tool (e.g. ZoomAreaTool uses mouse up to complete)
+        if (_currentTool != null && _currentTool.IsDrawing)
+        {
+            var screenPoint = e.GetPosition(this);
+            var cadPoint = GetSnappedCadPoint(screenPoint);
+            _currentTool.OnMouseUp(cadPoint, MouseButton.Left);
+            Render();
+            return;
+        }
+
+        if (_isMarqueeSelecting)
+        {
+            CompleteMarqueeSelection(e);
+            return;
+        }
+
+        if (_isMoving)
+        {
+            CompleteMoveOperation(e);
+            return;
         }
     }
 
@@ -1125,11 +1291,117 @@ public class CadCanvas : FrameworkElement
 
             Render();
         }
+
+        if (_isMarqueeSelecting)
+        {
+            _marqueeCurrentScreen = screenPoint;
+            Render();
+        }
+
+        if (_isMoving)
+        {
+            _moveCurrentCadPoint = ScreenToCad(screenPoint);
+            Render();
+        }
     }
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
         InvalidateCache(); // Size changed - need new bitmap
+        Render();
+    }
+
+    private void CompleteMarqueeSelection(MouseButtonEventArgs e)
+    {
+        _isMarqueeSelecting = false;
+        ReleaseMouseCapture();
+
+        var screenPoint = e.GetPosition(this);
+        bool addToSelection = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+
+        // Check if drag was too small (treat as click on empty space)
+        double dragDist = Math.Max(
+            Math.Abs(screenPoint.X - _marqueeStartScreen.X),
+            Math.Abs(screenPoint.Y - _marqueeStartScreen.Y));
+
+        if (dragDist < 3)
+        {
+            // No significant drag - treat as click on empty space (clear selection)
+            EntityClicked?.Invoke(this, new CadEntityClickEventArgs(null, addToSelection));
+            Render();
+            return;
+        }
+
+        // Convert screen corners to CAD space
+        var cadStart = ScreenToCad(_marqueeStartScreen);
+        var cadEnd = ScreenToCad(screenPoint);
+
+        double minX = Math.Min(cadStart.X, cadEnd.X);
+        double maxX = Math.Max(cadStart.X, cadEnd.X);
+        double minY = Math.Min(cadStart.Y, cadEnd.Y);
+        double maxY = Math.Max(cadStart.Y, cadEnd.Y);
+        var selectionRect = new Rect(minX, minY, maxX - minX, maxY - minY);
+
+        // Determine selection mode: left-to-right = window (inside), right-to-left = crossing (intersect)
+        bool isWindowSelection = cadEnd.X > cadStart.X;
+
+        var entities = Entities;
+        if (entities == null)
+        {
+            Render();
+            return;
+        }
+
+        var matchedEntities = new List<Entity>();
+        foreach (var entity in entities)
+        {
+            // Skip hidden layers
+            if (HiddenLayers != null && entity.Layer != null &&
+                HiddenLayers.Any(l => l == entity.Layer.Name))
+                continue;
+
+            var bounds = BoundingBoxHelper.GetBounds(entity);
+            if (bounds == null)
+                continue;
+
+            if (isWindowSelection)
+            {
+                // Window mode: entity must be fully inside
+                if (selectionRect.Contains(bounds.Value))
+                    matchedEntities.Add(entity);
+            }
+            else
+            {
+                // Crossing mode: entity bounds must intersect
+                if (selectionRect.IntersectsWith(bounds.Value))
+                    matchedEntities.Add(entity);
+            }
+        }
+
+        MarqueeSelectionCompleted?.Invoke(this, new MarqueeSelectionEventArgs(matchedEntities, addToSelection));
+        Render();
+    }
+
+    private void CompleteMoveOperation(MouseButtonEventArgs e)
+    {
+        _isMoving = false;
+        ReleaseMouseCapture();
+
+        var screenPoint = e.GetPosition(this);
+        var cadEnd = ScreenToCad(screenPoint);
+
+        double dx = cadEnd.X - _moveStartCadPoint.X;
+        double dy = cadEnd.Y - _moveStartCadPoint.Y;
+
+        // Check if move delta is negligible
+        double threshold = 1.0 / _scale;
+        if (Math.Abs(dx) < threshold && Math.Abs(dy) < threshold)
+        {
+            Render();
+            return;
+        }
+
+        MoveCompleted?.Invoke(this, new MoveCompletedEventArgs(dx, dy));
         Render();
     }
 
@@ -1174,5 +1446,29 @@ public class CadEntityClickEventArgs : EventArgs
     {
         Entity = entity;
         AddToSelection = addToSelection;
+    }
+}
+
+public class MarqueeSelectionEventArgs : EventArgs
+{
+    public IReadOnlyList<Entity> SelectedEntities { get; }
+    public bool AddToSelection { get; }
+
+    public MarqueeSelectionEventArgs(IReadOnlyList<Entity> selectedEntities, bool addToSelection)
+    {
+        SelectedEntities = selectedEntities;
+        AddToSelection = addToSelection;
+    }
+}
+
+public class MoveCompletedEventArgs : EventArgs
+{
+    public double DeltaX { get; }
+    public double DeltaY { get; }
+
+    public MoveCompletedEventArgs(double deltaX, double deltaY)
+    {
+        DeltaX = deltaX;
+        DeltaY = deltaY;
     }
 }

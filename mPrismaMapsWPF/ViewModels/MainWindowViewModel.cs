@@ -11,6 +11,7 @@ using mPrismaMapsWPF.Drawing;
 using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Services;
+using mPrismaMapsWPF.Controls;
 using WpfPoint = System.Windows.Point;
 
 namespace mPrismaMapsWPF.ViewModels;
@@ -128,6 +129,8 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private double _viewRotation;
 
+    private List<Entity>? _clipboardEntities;
+
     public ObservableCollection<EntityModel> Entities { get; } = new();
     private Dictionary<Entity, EntityModel> _entityLookup = new();
     public CadDocumentModel Document => _documentService.CurrentDocument;
@@ -151,6 +154,7 @@ public partial class MainWindowViewModel : ObservableObject
     public event EventHandler<RotateViewEventArgs>? RotateViewRequested;
     public event EventHandler<DeleteOutsideViewportEventArgs>? DeleteOutsideViewportRequested;
     public event EventHandler<ZoomToEntityEventArgs>? ZoomToEntityRequested;
+    public event EventHandler<ZoomToAreaEventArgs>? ZoomToAreaRequested;
 
     [RelayCommand]
     private async Task OpenFileAsync()
@@ -342,6 +346,14 @@ public partial class MainWindowViewModel : ObservableObject
         DrawingMode = DrawingMode.DrawPolygon;
         UpdateModeFlags();
         DrawingStatusText = "Polygon: Click to add points (min 3), double-click or Enter to close";
+    }
+
+    [RelayCommand]
+    private void SetZoomToAreaMode()
+    {
+        DrawingMode = DrawingMode.ZoomToArea;
+        UpdateModeFlags();
+        DrawingStatusText = "Zoom to Area: Click and drag to define zoom rectangle";
     }
 
     [RelayCommand]
@@ -554,6 +566,98 @@ public partial class MainWindowViewModel : ObservableObject
 
     private bool CanDeleteSelected() => _selectionService.SelectedEntities.Count > 0;
 
+    [RelayCommand(CanExecute = nameof(CanCopy))]
+    private void Copy()
+    {
+        var selected = _selectionService.SelectedEntities.ToList();
+        _clipboardEntities = new List<Entity>();
+        foreach (var entityModel in selected)
+        {
+            var clone = EntityTransformHelper.CloneEntity(entityModel.Entity);
+            if (clone != null)
+                _clipboardEntities.Add(clone);
+        }
+
+        PasteCommand.NotifyCanExecuteChanged();
+        StatusText = $"Copied {_clipboardEntities.Count} entities";
+    }
+
+    private bool CanCopy() => _selectionService.SelectedEntities.Count > 0;
+
+    [RelayCommand(CanExecute = nameof(CanPaste))]
+    private void Paste()
+    {
+        if (_clipboardEntities == null || _clipboardEntities.Count == 0)
+            return;
+
+        _documentService.CurrentDocument.EnsureDocumentExists();
+
+        // Clone again so paste can be repeated
+        var pasteEntities = new List<Entity>();
+        foreach (var entity in _clipboardEntities)
+        {
+            var clone = EntityTransformHelper.CloneEntity(entity);
+            if (clone != null)
+            {
+                // Offset by (20, 20) CAD units
+                EntityTransformHelper.TranslateEntity(clone, 20, 20);
+                pasteEntities.Add(clone);
+            }
+        }
+
+        if (pasteEntities.Count == 0)
+            return;
+
+        var command = new PasteEntitiesCommand(_documentService.CurrentDocument, pasteEntities);
+        _undoRedoService.Execute(command);
+
+        // Add EntityModels and select pasted entities
+        _selectionService.ClearSelection();
+        var pastedModels = new List<EntityModel>();
+        foreach (var entity in pasteEntities)
+        {
+            var entityModel = new EntityModel(entity);
+            _entityLookup[entity] = entityModel;
+            Entities.Add(entityModel);
+            pastedModels.Add(entityModel);
+        }
+
+        _selectionService.SelectMultiple(pastedModels);
+        EntityCount = Entities.Count;
+
+        // Update clipboard to the new clones so next paste offsets from these positions
+        _clipboardEntities = pasteEntities;
+
+        StatusText = $"Pasted {pasteEntities.Count} entities";
+        EntitiesChanged?.Invoke(this, EventArgs.Empty);
+        RenderRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private bool CanPaste() => _clipboardEntities != null && _clipboardEntities.Count > 0;
+
+    public void OnMoveCompleted(MoveCompletedEventArgs e)
+    {
+        var selectedEntities = _selectionService.SelectedEntities
+            .Select(em => em.Entity)
+            .ToList();
+
+        if (selectedEntities.Count == 0)
+            return;
+
+        var command = new MoveEntitiesCommand(_documentService.CurrentDocument, selectedEntities, e.DeltaX, e.DeltaY);
+        _undoRedoService.Execute(command);
+
+        // Invalidate caches for moved entities
+        foreach (var entity in selectedEntities)
+        {
+            BoundingBoxHelper.InvalidateEntity(entity.Handle);
+        }
+
+        EntitiesChanged?.Invoke(this, EventArgs.Empty);
+        RenderRequested?.Invoke(this, EventArgs.Empty);
+        StatusText = $"Moved {selectedEntities.Count} entities";
+    }
+
     [RelayCommand(CanExecute = nameof(CanSave))]
     private void DeleteByType(Type entityType)
     {
@@ -680,6 +784,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         SelectedCount = e.SelectedEntities.Count;
         DeleteSelectedCommand.NotifyCanExecuteChanged();
+        CopyCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>
@@ -715,6 +820,18 @@ public partial class MainWindowViewModel : ObservableObject
     {
         if (e.Points.Count < 2)
             return;
+
+        // Handle non-entity-creating tools
+        if (e.Mode == DrawingMode.ZoomToArea)
+        {
+            var minX = Math.Min(e.Points[0].X, e.Points[1].X);
+            var minY = Math.Min(e.Points[0].Y, e.Points[1].Y);
+            var maxX = Math.Max(e.Points[0].X, e.Points[1].X);
+            var maxY = Math.Max(e.Points[0].Y, e.Points[1].Y);
+            ZoomToAreaRequested?.Invoke(this, new ZoomToAreaEventArgs(minX, minY, maxX, maxY));
+            SetSelectMode();
+            return;
+        }
 
         // Ensure document exists (create if needed for drawing without loading a file)
         _documentService.CurrentDocument.EnsureDocumentExists();
@@ -818,5 +935,21 @@ public class ZoomToEntityEventArgs : EventArgs
     public ZoomToEntityEventArgs(Entity entity)
     {
         Entity = entity;
+    }
+}
+
+public class ZoomToAreaEventArgs : EventArgs
+{
+    public double MinX { get; }
+    public double MinY { get; }
+    public double MaxX { get; }
+    public double MaxY { get; }
+
+    public ZoomToAreaEventArgs(double minX, double minY, double maxX, double maxY)
+    {
+        MinX = minX;
+        MinY = minY;
+        MaxX = maxX;
+        MaxY = maxY;
     }
 }
