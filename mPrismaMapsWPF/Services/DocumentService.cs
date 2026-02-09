@@ -2,6 +2,7 @@ using System.IO;
 using ACadSharp;
 using ACadSharp.IO;
 using ACadSharp.Tables;
+using Microsoft.Extensions.Logging;
 using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
 
@@ -9,6 +10,13 @@ namespace mPrismaMapsWPF.Services;
 
 public class DocumentService : IDocumentService
 {
+    private readonly ILogger<DocumentService> _logger;
+
+    public DocumentService(ILogger<DocumentService> logger)
+    {
+        _logger = logger;
+    }
+
     public CadDocumentModel CurrentDocument { get; } = new();
 
     public event EventHandler<DocumentLoadedEventArgs>? DocumentLoaded;
@@ -20,6 +28,8 @@ public class DocumentService : IDocumentService
         string filePath,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Scanning entity types in {FilePath}", filePath);
+
         return await Task.Run(() =>
         {
             CadDocument doc = ReadFile(filePath);
@@ -58,6 +68,8 @@ public class DocumentService : IDocumentService
 
     public async Task<bool> OpenAsync(string filePath, ISet<Type>? excludedTypes, IProgress<int>? progress = null, CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Opening file {FilePath}", filePath);
+
         try
         {
             var document = await Task.Run(() =>
@@ -95,16 +107,20 @@ public class DocumentService : IDocumentService
             int entityCount = CurrentDocument.ModelSpaceEntities.Count();
             int layerCount = CurrentDocument.Layers.Count();
 
+            _logger.LogInformation("Opened {FilePath}: {EntityCount} entities, {LayerCount} layers", filePath, entityCount, layerCount);
+
             DocumentLoaded?.Invoke(this, new DocumentLoadedEventArgs(filePath, entityCount, layerCount));
 
             return true;
         }
         catch (OperationCanceledException)
         {
+            _logger.LogDebug("Open cancelled for {FilePath}", filePath);
             return false;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Failed to open file {FilePath}", filePath);
             return false;
         }
     }
@@ -115,6 +131,8 @@ public class DocumentService : IDocumentService
             return false;
 
         string targetPath = filePath ?? CurrentDocument.FilePath ?? throw new InvalidOperationException("No file path specified");
+
+        _logger.LogInformation("Saving file to {FilePath}", targetPath);
 
         try
         {
@@ -135,16 +153,19 @@ public class DocumentService : IDocumentService
             }, cancellationToken);
 
             CurrentDocument.IsDirty = false;
+            _logger.LogInformation("Saved file to {FilePath}", targetPath);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Failed to save file to {FilePath}", targetPath);
             return false;
         }
     }
 
     public void Close()
     {
+        _logger.LogInformation("Closing document");
         CurrentDocument.Clear();
         RenderCache.Clear();
         DocumentClosed?.Invoke(this, EventArgs.Empty);

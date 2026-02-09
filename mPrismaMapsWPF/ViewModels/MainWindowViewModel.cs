@@ -4,6 +4,7 @@ using System.Windows;
 using ACadSharp.Entities;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 using mPrismaMapsWPF.Commands;
 using mPrismaMapsWPF.Drawing;
@@ -19,15 +20,18 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IDocumentService _documentService;
     private readonly ISelectionService _selectionService;
     private readonly IUndoRedoService _undoRedoService;
+    private readonly ILogger<MainWindowViewModel> _logger;
 
     public MainWindowViewModel(
         IDocumentService documentService,
         ISelectionService selectionService,
-        IUndoRedoService undoRedoService)
+        IUndoRedoService undoRedoService,
+        ILogger<MainWindowViewModel> logger)
     {
         _documentService = documentService;
         _selectionService = selectionService;
         _undoRedoService = undoRedoService;
+        _logger = logger;
 
         _documentService.DocumentLoaded += OnDocumentLoaded;
         _documentService.DocumentClosed += OnDocumentClosed;
@@ -165,6 +169,7 @@ public partial class MainWindowViewModel : ObservableObject
 
             try
             {
+                _logger.LogInformation("User opening file {FilePath}", dialog.FileName);
                 var scanResults = await _documentService.ScanEntityTypesAsync(dialog.FileName);
 
                 IsLoading = false;
@@ -173,8 +178,9 @@ public partial class MainWindowViewModel : ObservableObject
                 SelectEntityTypesRequested?.Invoke(this,
                     new SelectEntityTypesEventArgs(dialog.FileName, scanResults));
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                _logger.LogError(ex, "Failed to scan file {FilePath}", dialog.FileName);
                 IsLoading = false;
                 StatusText = "Failed to scan file";
                 MessageBox.Show($"Failed to scan file: {dialog.FileName}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -196,6 +202,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         if (!success)
         {
+            _logger.LogError("Failed to load file {FilePath}", filePath);
             StatusText = "Failed to load file";
             MessageBox.Show($"Failed to open file: {filePath}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
@@ -215,12 +222,14 @@ public partial class MainWindowViewModel : ObservableObject
             return;
         }
 
+        _logger.LogInformation("Saving file");
         IsLoading = true;
         StatusText = "Saving...";
 
         bool success = await _documentService.SaveAsync();
 
         IsLoading = false;
+        if (!success) _logger.LogError("Save failed");
         StatusText = success ? "Saved" : "Save failed";
     }
 
@@ -251,6 +260,7 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void CloseFile()
     {
+        _logger.LogInformation("Closing file");
         if (_documentService.HasUnsavedChanges)
         {
             var result = MessageBox.Show(
