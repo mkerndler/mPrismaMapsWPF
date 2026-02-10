@@ -112,6 +112,10 @@
         <KeyBinding Key="V" Modifiers="Ctrl" Command="{Binding PasteCommand}"/>
         <!-- Zoom to Area -->
         <KeyBinding Key="Z" Command="{Binding SetZoomToAreaModeCommand}"/>
+        <!-- Place Unit Number -->
+        <KeyBinding Key="N" Command="{Binding SetPlaceUnitNumberModeCommand}"/>
+        <!-- Lock -->
+        <KeyBinding Key="L" Modifiers="Ctrl" Command="{Binding LockSelectedCommand}"/>
         <!-- View transform shortcuts -->
         <KeyBinding Key="D0" Modifiers="Ctrl" Command="{Binding CenterOnOriginCommand}"/>
         <KeyBinding Key="H" Modifiers="Ctrl" Command="{Binding ToggleFlipXCommand}"/>
@@ -165,6 +169,17 @@
                 <MenuItem Header="Delete by _Type" x:Name="DeleteByTypeMenu">
                     <!-- Populated dynamically in code-behind -->
                 </MenuItem>
+                <Separator/>
+                <MenuItem Header="_Lock Selected" Command="{Binding LockSelectedCommand}" InputGestureText="Ctrl+L">
+                    <MenuItem.Icon>
+                        <TextBlock Text="&#x1F512;" FontSize="12"/>
+                    </MenuItem.Icon>
+                </MenuItem>
+                <MenuItem Header="_Unlock All Entities" Command="{Binding UnlockAllEntitiesCommand}">
+                    <MenuItem.Icon>
+                        <TextBlock Text="&#x1F513;" FontSize="12"/>
+                    </MenuItem.Icon>
+                </MenuItem>
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="Zoom _In" Command="{Binding ZoomInCommand}" InputGestureText="+"/>
@@ -191,6 +206,8 @@
                 <MenuItem Header="Reset All _Transforms" Command="{Binding ResetViewTransformsCommand}"/>
             </MenuItem>
             <MenuItem Header="_Tools">
+                <MenuItem Header="Place _Unit Number" Command="{Binding SetPlaceUnitNumberModeCommand}" InputGestureText="N"/>
+                <Separator/>
                 <MenuItem Header="_Delete Hidden Entities" Command="{Binding DeleteHiddenEntitiesCommand}" ToolTip="Delete all hidden/invisible entities"/>
                 <MenuItem Header="Delete Entities _Outside Viewport" Command="{Binding DeleteEntitiesOutsideViewportCommand}" ToolTip="Delete all entities outside the current view"/>
             </MenuItem>
@@ -272,15 +289,51 @@
                     <TextBlock Text="&#x2B21;" FontSize="16"/>
                 </Button>
                 <Separator Margin="8,4"/>
+                <!-- Unit Number Tool -->
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding SetPlaceUnitNumberModeCommand}"
+                        ToolTip="Place Unit Number (N)">
+                    <TextBlock Text="#" FontSize="16" FontWeight="Bold"/>
+                </Button>
+                <TextBlock Text="Pfx:" Foreground="#FF888888" VerticalAlignment="Center" Margin="4,0,2,0" FontSize="10"/>
+                <TextBox Text="{Binding UnitNumberPrefix, UpdateSourceTrigger=PropertyChanged}"
+                         Width="40" Height="24"
+                         Background="#FF3C3C3C" Foreground="White"
+                         BorderBrush="#FF555555"
+                         VerticalContentAlignment="Center"
+                         Padding="2,0"
+                         ToolTip="Unit number prefix"/>
+                <TextBlock Text="#:" Foreground="#FF888888" VerticalAlignment="Center" Margin="4,0,2,0" FontSize="10"/>
+                <TextBox Text="{Binding UnitNextNumber, UpdateSourceTrigger=LostFocus}"
+                         Width="40" Height="24"
+                         Background="#FF3C3C3C" Foreground="White"
+                         BorderBrush="#FF555555"
+                         VerticalContentAlignment="Center"
+                         Padding="2,0"
+                         ToolTip="Next unit number"/>
+                <TextBlock Text="H:" Foreground="#FF888888" VerticalAlignment="Center" Margin="4,0,2,0" FontSize="10"/>
+                <TextBox Text="{Binding UnitTextHeight, UpdateSourceTrigger=LostFocus}"
+                         Width="40" Height="24"
+                         Background="#FF3C3C3C" Foreground="White"
+                         BorderBrush="#FF555555"
+                         VerticalContentAlignment="Center"
+                         Padding="2,0"
+                         ToolTip="Text height"/>
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding UnitAutoIncrement}"
+                              ToolTip="Auto-increment unit number">
+                    <TextBlock Text="A+" FontSize="10" FontWeight="Bold"/>
+                </ToggleButton>
+                <Separator Margin="8,4"/>
                 <!-- Snap and Grid -->
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
-                              IsChecked="{Binding IsSnapEnabled}"
+                              IsChecked="{Binding IsSnapEnabled, Mode=OneWay}"
                               Command="{Binding ToggleSnapCommand}"
                               ToolTip="Toggle Snap (F9)">
                     <TextBlock Text="&#x229E;" FontSize="16"/>
                 </ToggleButton>
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
-                              IsChecked="{Binding IsGridVisible}"
+                              IsChecked="{Binding IsGridVisible, Mode=OneWay}"
                               Command="{Binding ToggleGridCommand}"
                               ToolTip="Toggle Grid (F7)">
                     <TextBlock Text="&#x25A6;" FontSize="16"/>
@@ -295,13 +348,13 @@
                 <Separator Margin="8,4"/>
                 <!-- View Transform Tools -->
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
-                              IsChecked="{Binding FlipX}"
+                              IsChecked="{Binding FlipX, Mode=OneWay}"
                               Command="{Binding ToggleFlipXCommand}"
                               ToolTip="Flip Horizontal (Ctrl+H)">
                     <TextBlock Text="&#x2194;" FontSize="16"/>
                 </ToggleButton>
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
-                              IsChecked="{Binding FlipY}"
+                              IsChecked="{Binding FlipY, Mode=OneWay}"
                               Command="{Binding ToggleFlipYCommand}"
                               ToolTip="Flip Vertical (Ctrl+J)">
                     <TextBlock Text="&#x2195;" FontSize="16"/>
@@ -685,6 +738,11 @@
                                     Padding="6,2" Margin="0,0,2,2"
                                     Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
                                     ToolTip="Show only selected layers"/>
+                            <Button Content="Lock"
+                                    Command="{Binding LayerPanel.ToggleSelectedLayersLockCommand}"
+                                    Padding="6,2" Margin="0,0,2,2"
+                                    Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                                    ToolTip="Toggle lock on selected layers"/>
                             <Button Content="Delete"
                                     Command="{Binding LayerPanel.DeleteSelectedLayersCommand}"
                                     Padding="6,2" Margin="0,0,2,2"
@@ -716,7 +774,25 @@
                                     <StackPanel Orientation="Horizontal">
                                         <CheckBox IsChecked="{Binding IsVisible}"
                                                   VerticalAlignment="Center"
-                                                  Margin="0,0,8,0"/>
+                                                  Margin="0,0,4,0"
+                                                  ToolTip="Visible"/>
+                                        <TextBlock Text="&#x1F512;" FontSize="10"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,4,0"
+                                                   Cursor="Hand"
+                                                   ToolTip="Locked"
+                                                   MouseLeftButtonDown="LayerLockIcon_MouseLeftButtonDown">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="#FF555555"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsLocked}" Value="True">
+                                                            <Setter Property="Foreground" Value="#FFFFCC00"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                         <Rectangle Width="12" Height="12"
                                                    Fill="{Binding Color, Converter={StaticResource ColorToBrushConverter}}"
                                                    Margin="0,0,8,0"/>

@@ -20,6 +20,7 @@ public class CadDocumentModel
         Document?.BlockRecords ?? Enumerable.Empty<BlockRecord>();
 
     public const string UserDrawingsLayerName = "User Drawings";
+    public const string UnitNumbersLayerName = "Unit Numbers";
 
     /// <summary>
     /// Gets or creates the "User Drawings" layer for user-created entities.
@@ -44,6 +45,29 @@ public class CadDocumentModel
         IsDirty = true;
 
         return userLayer;
+    }
+
+    /// <summary>
+    /// Gets or creates the "Unit Numbers" layer for placed unit numbers.
+    /// </summary>
+    public Layer? GetOrCreateUnitNumbersLayer()
+    {
+        if (Document == null)
+            return null;
+
+        var existingLayer = Document.Layers.FirstOrDefault(l => l.Name == UnitNumbersLayerName);
+        if (existingLayer != null)
+            return existingLayer;
+
+        var layer = new Layer(UnitNumbersLayerName)
+        {
+            Color = new ACadSharp.Color(3) // Green
+        };
+
+        Document.Layers.Add(layer);
+        IsDirty = true;
+
+        return layer;
     }
 
     /// <summary>

@@ -49,22 +49,21 @@ public class TextRenderer : IEntityRenderer
             fontSize,
             color);
 
-        context.PushTransform(new ScaleTransform(1, -1, position.X, position.Y));
+        // Offset upward so the baseline (bottom of text) aligns with the insert point
+        var textPosition = new System.Windows.Point(position.X, position.Y - formattedText.Height);
 
         double rotation = text.Rotation * 180 / Math.PI;
         if (Math.Abs(rotation) > 0.01)
         {
-            context.PushTransform(new RotateTransform(-rotation, position.X, position.Y));
+            context.PushTransform(new RotateTransform(rotation, position.X, position.Y));
         }
 
-        context.DrawText(formattedText, position);
+        context.DrawText(formattedText, textPosition);
 
         if (Math.Abs(rotation) > 0.01)
         {
             context.Pop();
         }
-
-        context.Pop();
     }
 
     private static void RenderMText(DrawingContext context, MText mtext, RenderContext renderContext)
@@ -98,22 +97,21 @@ public class TextRenderer : IEntityRenderer
             color,
             maxWidth);
 
-        context.PushTransform(new ScaleTransform(1, -1, position.X, position.Y));
+        // Offset upward so the bottom of the text aligns with the insert point
+        var textPosition = new System.Windows.Point(position.X, position.Y - formattedText.Height);
 
         double rotation = mtext.Rotation * 180 / Math.PI;
         if (Math.Abs(rotation) > 0.01)
         {
-            context.PushTransform(new RotateTransform(-rotation, position.X, position.Y));
+            context.PushTransform(new RotateTransform(rotation, position.X, position.Y));
         }
 
-        context.DrawText(formattedText, position);
+        context.DrawText(formattedText, textPosition);
 
         if (Math.Abs(rotation) > 0.01)
         {
             context.Pop();
         }
-
-        context.Pop();
     }
 
     private static string StripMTextFormatting(string mtext)

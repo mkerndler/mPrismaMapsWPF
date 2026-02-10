@@ -35,6 +35,7 @@ public partial class LayerPanelViewModel : ObservableObject
     private int _selectedLayerCount;
 
     public event EventHandler? LayerVisibilityChanged;
+    public event EventHandler? LayerLockChanged;
     public event EventHandler<DeleteLayerRequestedEventArgs>? DeleteLayerRequested;
     public event EventHandler<DeleteMultipleLayersRequestedEventArgs>? DeleteMultipleLayersRequested;
     public event EventHandler? LayersChanged;
@@ -138,6 +139,49 @@ public partial class LayerPanelViewModel : ObservableObject
     {
         _documentService.CurrentDocument.IsDirty = true;
         LayerVisibilityChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void OnLayerLockToggled(LayerModel layer)
+    {
+        LayerLockChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    [RelayCommand(CanExecute = nameof(CanToggleSelectedLayersLock))]
+    private void ToggleSelectedLayersLock()
+    {
+        if (SelectedLayers.Count == 0)
+            return;
+
+        bool allLocked = SelectedLayers.All(l => l.IsLocked);
+
+        foreach (var layer in SelectedLayers)
+        {
+            layer.IsLocked = !allLocked;
+        }
+
+        LayerLockChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private bool CanToggleSelectedLayersLock() => SelectedLayers.Count > 0;
+
+    [RelayCommand]
+    private void LockAllLayers()
+    {
+        foreach (var layer in Layers)
+        {
+            layer.IsLocked = true;
+        }
+        LayerLockChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    [RelayCommand]
+    private void UnlockAllLayers()
+    {
+        foreach (var layer in Layers)
+        {
+            layer.IsLocked = false;
+        }
+        LayerLockChanged?.Invoke(this, EventArgs.Empty);
     }
 
     [RelayCommand(CanExecute = nameof(CanDeleteSelectedLayers))]
@@ -303,6 +347,7 @@ public partial class LayerPanelViewModel : ObservableObject
         ShowSelectedLayersCommand.NotifyCanExecuteChanged();
         HideSelectedLayersCommand.NotifyCanExecuteChanged();
         IsolateSelectedLayersCommand.NotifyCanExecuteChanged();
+        ToggleSelectedLayersLockCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>
@@ -319,6 +364,10 @@ public partial class LayerPanelViewModel : ObservableObject
                 if (args.PropertyName == nameof(LayerModel.IsVisible))
                 {
                     OnLayerVisibilityToggled(layerModel);
+                }
+                else if (args.PropertyName == nameof(LayerModel.IsLocked))
+                {
+                    OnLayerLockToggled(layerModel);
                 }
             };
             Layers.Add(layerModel);
@@ -341,6 +390,10 @@ public partial class LayerPanelViewModel : ObservableObject
                 if (args.PropertyName == nameof(LayerModel.IsVisible))
                 {
                     OnLayerVisibilityToggled(layerModel);
+                }
+                else if (args.PropertyName == nameof(LayerModel.IsLocked))
+                {
+                    OnLayerLockToggled(layerModel);
                 }
             };
             Layers.Add(layerModel);

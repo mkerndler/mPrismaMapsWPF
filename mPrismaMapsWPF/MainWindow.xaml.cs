@@ -36,6 +36,7 @@ public partial class MainWindow : Window
         _viewModel.DeleteOutsideViewportRequested += OnDeleteOutsideViewportRequested;
         _viewModel.ZoomToEntityRequested += OnZoomToEntityRequested;
         _viewModel.LayerPanel.LayerVisibilityChanged += OnLayerVisibilityChanged;
+        _viewModel.LayerPanel.LayerLockChanged += OnLayerLockChanged;
         _viewModel.LayerPanel.DeleteLayerRequested += OnDeleteLayerRequested;
         _viewModel.LayerPanel.DeleteMultipleLayersRequested += OnDeleteMultipleLayersRequested;
         _viewModel.LayerPanel.LayersChanged += OnLayersChanged;
@@ -47,9 +48,12 @@ public partial class MainWindow : Window
 
         CadCanvas.CadMouseMove += OnCadMouseMove;
         CadCanvas.EntityClicked += OnEntityClicked;
+        CadCanvas.EntityDoubleClicked += OnEntityDoubleClicked;
         CadCanvas.DrawingCompleted += OnDrawingCompleted;
         CadCanvas.MarqueeSelectionCompleted += OnMarqueeSelectionCompleted;
         CadCanvas.MoveCompleted += OnMoveCompleted;
+
+        _viewModel.EditUnitNumberRequested += OnEditUnitNumberRequested;
 
         // Set up drawing mode binding
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
@@ -74,6 +78,16 @@ public partial class MainWindow : Window
         else if (e.PropertyName == nameof(MainWindowViewModel.ViewRotation))
         {
             CadCanvas.ViewRotation = _viewModel.ViewRotation;
+        }
+        else if (e.PropertyName is nameof(MainWindowViewModel.UnitNextNumber) or
+                 nameof(MainWindowViewModel.UnitNumberPrefix) or
+                 nameof(MainWindowViewModel.UnitTextHeight))
+        {
+            CadCanvas.ConfigureUnitNumberTool(
+                _viewModel.UnitNumberPrefix,
+                _viewModel.UnitNextNumber,
+                "D3",
+                _viewModel.UnitTextHeight);
         }
     }
 
@@ -151,6 +165,18 @@ public partial class MainWindow : Window
             .Select(l => l.Name)
             .ToList();
         CadCanvas.HiddenLayers = hiddenLayers;
+
+        var lockedLayers = _viewModel.LayerPanel.Layers
+            .Where(l => l.IsLocked)
+            .Select(l => l.Name)
+            .ToList();
+        CadCanvas.LockedLayers = lockedLayers;
+
+        var lockedHandles = _viewModel.Entities
+            .Where(e => e.IsLocked)
+            .Select(e => e.Handle)
+            .ToList();
+        CadCanvas.LockedHandles = lockedHandles;
     }
 
     private void OnZoomToFitRequested(object? sender, EventArgs e)
@@ -173,6 +199,12 @@ public partial class MainWindow : Window
             .Select(l => l.Name)
             .ToList();
         CadCanvas.HiddenLayers = hiddenLayers;
+        CadCanvas.Render();
+    }
+
+    private void OnLayerLockChanged(object? sender, EventArgs e)
+    {
+        UpdateCanvasBindings();
         CadCanvas.Render();
     }
 
@@ -547,6 +579,37 @@ public partial class MainWindow : Window
         }
 
         _viewModel.DeleteSelectedCommand.Execute(null);
+    }
+
+    private void OnEntityDoubleClicked(object? sender, CadEntityClickEventArgs e)
+    {
+        if (e.Entity is MText mtext)
+        {
+            _viewModel.EditUnitNumber(mtext);
+        }
+    }
+
+    private void OnEditUnitNumberRequested(object? sender, EditUnitNumberRequestedEventArgs e)
+    {
+        var dialog = new EditUnitNumberDialog(e.CurrentValue)
+        {
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            e.NewValue = dialog.UnitNumberValue;
+            e.Cancelled = false;
+        }
+    }
+
+    private void LayerLockIcon_MouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement element && element.DataContext is LayerModel layer)
+        {
+            layer.IsLocked = !layer.IsLocked;
+            e.Handled = true;
+        }
     }
 
     private void TreeViewShowProperties_Click(object sender, RoutedEventArgs e)

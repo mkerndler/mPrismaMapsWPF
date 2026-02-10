@@ -19,6 +19,9 @@ public partial class EntityModel : ObservableObject
     [ObservableProperty]
     private bool _isSelected;
 
+    [ObservableProperty]
+    private bool _isLocked;
+
     public string DisplayName => $"{TypeName} ({Handle:X})";
 
     /// <summary>

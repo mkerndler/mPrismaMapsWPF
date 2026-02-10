@@ -129,6 +129,19 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private double _viewRotation;
 
+    // Unit number placement properties
+    [ObservableProperty]
+    private string _unitNumberPrefix = "";
+
+    [ObservableProperty]
+    private int _unitNextNumber = 1;
+
+    [ObservableProperty]
+    private double _unitTextHeight = 10.0;
+
+    [ObservableProperty]
+    private bool _unitAutoIncrement = true;
+
     private List<Entity>? _clipboardEntities;
 
     public ObservableCollection<EntityModel> Entities { get; } = new();
@@ -155,6 +168,7 @@ public partial class MainWindowViewModel : ObservableObject
     public event EventHandler<DeleteOutsideViewportEventArgs>? DeleteOutsideViewportRequested;
     public event EventHandler<ZoomToEntityEventArgs>? ZoomToEntityRequested;
     public event EventHandler<ZoomToAreaEventArgs>? ZoomToAreaRequested;
+    public event EventHandler<EditUnitNumberRequestedEventArgs>? EditUnitNumberRequested;
 
     [RelayCommand]
     private async Task OpenFileAsync()
@@ -357,6 +371,14 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void SetPlaceUnitNumberMode()
+    {
+        DrawingMode = DrawingMode.PlaceUnitNumber;
+        UpdateModeFlags();
+        DrawingStatusText = $"Place Unit Number: Click to place '{UnitNumberPrefix}{UnitNextNumber.ToString("D3")}'";
+    }
+
+    [RelayCommand]
     private void ToggleSnap()
     {
         IsSnapEnabled = !IsSnapEnabled;
@@ -515,7 +537,7 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private void SelectAll()
     {
-        _selectionService.SelectMultiple(Entities);
+        _selectionService.SelectMultiple(Entities.Where(e => !e.IsLocked));
     }
 
     [RelayCommand]
@@ -545,23 +567,35 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanDeleteSelected))]
     private void DeleteSelected()
     {
-        var selectedEntities = _selectionService.SelectedEntities.ToList();
-        if (selectedEntities.Count == 0)
+        var allSelected = _selectionService.SelectedEntities.ToList();
+        if (allSelected.Count == 0)
             return;
 
-        var command = new DeleteEntitiesCommand(_documentService.CurrentDocument, selectedEntities);
+        var deletable = allSelected.Where(e => !e.IsLocked).ToList();
+        int skipped = allSelected.Count - deletable.Count;
+
+        if (deletable.Count == 0)
+        {
+            StatusText = $"Cannot delete: {skipped} locked entity(ies)";
+            return;
+        }
+
+        var command = new DeleteEntitiesCommand(_documentService.CurrentDocument, deletable);
         _undoRedoService.Execute(command);
 
         // Clear selection and remove from entities collection
         _selectionService.ClearSelection();
 
-        foreach (var entityModel in selectedEntities)
+        foreach (var entityModel in deletable)
         {
             _entityLookup.Remove(entityModel.Entity);
             Entities.Remove(entityModel);
         }
 
         RefreshAfterEdit();
+
+        if (skipped > 0)
+            StatusText = $"Deleted {deletable.Count} entities, {skipped} locked entity(ies) skipped";
     }
 
     private bool CanDeleteSelected() => _selectionService.SelectedEntities.Count > 0;
@@ -635,9 +669,41 @@ public partial class MainWindowViewModel : ObservableObject
 
     private bool CanPaste() => _clipboardEntities != null && _clipboardEntities.Count > 0;
 
+    [RelayCommand(CanExecute = nameof(CanLockSelected))]
+    private void LockSelected()
+    {
+        var selected = _selectionService.SelectedEntities.ToList();
+        foreach (var entity in selected)
+        {
+            entity.IsLocked = true;
+        }
+        _selectionService.ClearSelection();
+        StatusText = $"Locked {selected.Count} entity(ies)";
+        RenderRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private bool CanLockSelected() => _selectionService.SelectedEntities.Count > 0;
+
+    [RelayCommand]
+    private void UnlockAllEntities()
+    {
+        int count = 0;
+        foreach (var entity in Entities)
+        {
+            if (entity.IsLocked)
+            {
+                entity.IsLocked = false;
+                count++;
+            }
+        }
+        StatusText = count > 0 ? $"Unlocked {count} entity(ies)" : "No locked entities";
+        RenderRequested?.Invoke(this, EventArgs.Empty);
+    }
+
     public void OnMoveCompleted(MoveCompletedEventArgs e)
     {
         var selectedEntities = _selectionService.SelectedEntities
+            .Where(em => !em.IsLocked)
             .Select(em => em.Entity)
             .ToList();
 
@@ -785,6 +851,7 @@ public partial class MainWindowViewModel : ObservableObject
         SelectedCount = e.SelectedEntities.Count;
         DeleteSelectedCommand.NotifyCanExecuteChanged();
         CopyCommand.NotifyCanExecuteChanged();
+        LockSelectedCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>
@@ -818,6 +885,12 @@ public partial class MainWindowViewModel : ObservableObject
     /// </summary>
     public void OnDrawingCompleted(DrawingCompletedEventArgs e)
     {
+        if (e.Mode == DrawingMode.PlaceUnitNumber)
+        {
+            HandlePlaceUnitNumber(e);
+            return;
+        }
+
         if (e.Points.Count < 2)
             return;
 
@@ -899,6 +972,61 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
+    private void HandlePlaceUnitNumber(DrawingCompletedEventArgs e)
+    {
+        if (e.Points.Count < 1 || string.IsNullOrEmpty(e.Text))
+            return;
+
+        _documentService.CurrentDocument.EnsureDocumentExists();
+
+        var unitLayer = _documentService.CurrentDocument.GetOrCreateUnitNumbersLayer();
+        if (unitLayer == null)
+            return;
+
+        var mtext = new MText
+        {
+            InsertPoint = new CSMath.XYZ(e.Points[0].X, e.Points[0].Y, 0),
+            Value = e.Text,
+            Height = UnitTextHeight,
+            Layer = unitLayer
+        };
+
+        var command = new AddEntityCommand(_documentService.CurrentDocument, mtext, $"Place unit number '{e.Text}'");
+        _undoRedoService.Execute(command);
+
+        var entityModel = new EntityModel(mtext);
+        _entityLookup[mtext] = entityModel;
+        Entities.Add(entityModel);
+        EntityCount = Entities.Count;
+
+        if (UnitAutoIncrement)
+        {
+            UnitNextNumber++;
+        }
+
+        LayerPanel.RefreshLayers();
+
+        StatusText = $"Placed unit number '{e.Text}' on layer '{CadDocumentModel.UnitNumbersLayerName}'";
+        DrawingStatusText = $"Place Unit Number: Click to place '{UnitNumberPrefix}{UnitNextNumber.ToString("D3")}'";
+
+        EntitiesChanged?.Invoke(this, EventArgs.Empty);
+        RenderRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void EditUnitNumber(MText entity)
+    {
+        var args = new EditUnitNumberRequestedEventArgs(entity, entity.Value);
+        EditUnitNumberRequested?.Invoke(this, args);
+
+        if (!args.Cancelled && args.NewValue != entity.Value)
+        {
+            var command = new EditUnitNumberCommand(entity, entity.Value, args.NewValue);
+            _undoRedoService.Execute(command);
+            RenderRequested?.Invoke(this, EventArgs.Empty);
+            StatusText = $"Edited unit number '{entity.Value}' -> '{args.NewValue}'";
+        }
+    }
+
     /// <summary>
     /// Updates the grid spacing based on the loaded document's extents.
     /// </summary>
@@ -951,5 +1079,20 @@ public class ZoomToAreaEventArgs : EventArgs
         MinY = minY;
         MaxX = maxX;
         MaxY = maxY;
+    }
+}
+
+public class EditUnitNumberRequestedEventArgs : EventArgs
+{
+    public MText Entity { get; }
+    public string CurrentValue { get; }
+    public string NewValue { get; set; }
+    public bool Cancelled { get; set; } = true;
+
+    public EditUnitNumberRequestedEventArgs(MText entity, string currentValue)
+    {
+        Entity = entity;
+        CurrentValue = currentValue;
+        NewValue = currentValue;
     }
 }

@@ -7,5 +7,6 @@ public enum DrawingMode
     DrawLine,
     DrawPolyline,
     DrawPolygon,
-    ZoomToArea
+    ZoomToArea,
+    PlaceUnitNumber
 }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -46,6 +47,10 @@ public class CadCanvas : FrameworkElement
 
     // Cached selected handles HashSet (rebuilt only when SelectedHandles property changes)
     private HashSet<ulong> _selectedHandlesSet = new();
+
+    // Locked entity/layer sets for preventing interaction
+    private HashSet<ulong> _lockedHandlesSet = new();
+    private HashSet<string> _lockedLayersSet = new();
 
     // Cached viewport bounds per frame
     private Rect? _frameViewportBounds;
@@ -141,6 +146,32 @@ public class CadCanvas : FrameworkElement
         set => SetValue(HiddenLayersProperty, value);
     }
 
+    public static readonly DependencyProperty LockedLayersProperty =
+        DependencyProperty.Register(
+            nameof(LockedLayers),
+            typeof(IEnumerable<string>),
+            typeof(CadCanvas),
+            new PropertyMetadata(null, OnLockedLayersChanged));
+
+    public IEnumerable<string>? LockedLayers
+    {
+        get => (IEnumerable<string>?)GetValue(LockedLayersProperty);
+        set => SetValue(LockedLayersProperty, value);
+    }
+
+    public static readonly DependencyProperty LockedHandlesProperty =
+        DependencyProperty.Register(
+            nameof(LockedHandles),
+            typeof(IEnumerable<ulong>),
+            typeof(CadCanvas),
+            new PropertyMetadata(null, OnLockedHandlesChanged));
+
+    public IEnumerable<ulong>? LockedHandles
+    {
+        get => (IEnumerable<ulong>?)GetValue(LockedHandlesProperty);
+        set => SetValue(LockedHandlesProperty, value);
+    }
+
     public static readonly DependencyProperty IsPanModeProperty =
         DependencyProperty.Register(
             nameof(IsPanMode),
@@ -234,6 +265,7 @@ public class CadCanvas : FrameworkElement
 
     public event EventHandler<CadMouseEventArgs>? CadMouseMove;
     public event EventHandler<CadEntityClickEventArgs>? EntityClicked;
+    public event EventHandler<CadEntityClickEventArgs>? EntityDoubleClicked;
     public event EventHandler<DrawingCompletedEventArgs>? DrawingCompleted;
     public event EventHandler<MarqueeSelectionEventArgs>? MarqueeSelectionCompleted;
     public event EventHandler<MoveCompletedEventArgs>? MoveCompleted;
@@ -590,6 +622,13 @@ public class CadCanvas : FrameworkElement
         if (_currentTool == null || !_currentTool.IsDrawing)
             return;
 
+        // Special preview for unit number tool
+        if (_currentTool is UnitNumberTool unitTool)
+        {
+            RenderUnitNumberPreview(dc, unitTool);
+            return;
+        }
+
         var previewPoints = _currentTool.GetPreviewPoints();
         if (previewPoints == null || previewPoints.Count < 2)
             return;
@@ -914,6 +953,28 @@ public class CadCanvas : FrameworkElement
         }
     }
 
+    private static void OnLockedLayersChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas canvas)
+        {
+            canvas._lockedLayersSet = canvas.LockedLayers?.ToHashSet() ?? new HashSet<string>();
+        }
+    }
+
+    private static void OnLockedHandlesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas canvas)
+        {
+            canvas._lockedHandlesSet = canvas.LockedHandles?.ToHashSet() ?? new HashSet<ulong>();
+        }
+    }
+
+    private bool IsEntityLocked(Entity entity)
+    {
+        return _lockedHandlesSet.Contains(entity.Handle) ||
+               (entity.Layer != null && _lockedLayersSet.Contains(entity.Layer.Name));
+    }
+
     private static void OnExtentsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is CadCanvas canvas && e.NewValue is Extents extents)
@@ -973,6 +1034,7 @@ public class CadCanvas : FrameworkElement
             DrawingMode.DrawPolyline => new PolylineTool(),
             DrawingMode.DrawPolygon => new PolygonTool(),
             DrawingMode.ZoomToArea => new ZoomAreaTool(),
+            DrawingMode.PlaceUnitNumber => new UnitNumberTool(),
             _ => null
         };
 
@@ -998,7 +1060,7 @@ public class CadCanvas : FrameworkElement
         Cursor = DrawingMode switch
         {
             DrawingMode.Pan => Cursors.Hand,
-            DrawingMode.DrawLine or DrawingMode.DrawPolyline or DrawingMode.DrawPolygon or DrawingMode.ZoomToArea => Cursors.Cross,
+            DrawingMode.DrawLine or DrawingMode.DrawPolyline or DrawingMode.DrawPolygon or DrawingMode.ZoomToArea or DrawingMode.PlaceUnitNumber => Cursors.Cross,
             _ => Cursors.Arrow
         };
     }
@@ -1125,6 +1187,13 @@ public class CadCanvas : FrameworkElement
     {
         Focus();
 
+        // Handle double-click for editing unit numbers in Select mode
+        if (e.ClickCount == 2 && DrawingMode == DrawingMode.Select)
+        {
+            HandleDoubleClick(e);
+            // Don't return - let the normal click handling proceed for selection
+        }
+
         var screenPoint = e.GetPosition(this);
 
         // Handle drawing mode - use snapped point for precise drawing
@@ -1158,7 +1227,7 @@ public class CadCanvas : FrameworkElement
             var candidates = _spatialGrid.Query(cadPoint, tolerance);
             foreach (var entity in candidates)
             {
-                if (HitTestHelper.HitTest(entity, cadPoint, tolerance))
+                if (HitTestHelper.HitTest(entity, cadPoint, tolerance) && !IsEntityLocked(entity))
                 {
                     hitEntity = entity;
                     break;
@@ -1170,7 +1239,7 @@ public class CadCanvas : FrameworkElement
             // Fallback: linear scan
             foreach (var entity in entities)
             {
-                if (HitTestHelper.HitTest(entity, cadPoint, tolerance))
+                if (HitTestHelper.HitTest(entity, cadPoint, tolerance) && !IsEntityLocked(entity))
                 {
                     hitEntity = entity;
                     break;
@@ -1360,6 +1429,10 @@ public class CadCanvas : FrameworkElement
                 HiddenLayers.Any(l => l == entity.Layer.Name))
                 continue;
 
+            // Skip locked entities
+            if (IsEntityLocked(entity))
+                continue;
+
             var bounds = BoundingBoxHelper.GetBounds(entity);
             if (bounds == null)
                 continue;
@@ -1403,6 +1476,103 @@ public class CadCanvas : FrameworkElement
 
         MoveCompleted?.Invoke(this, new MoveCompletedEventArgs(dx, dy));
         Render();
+    }
+
+    private void RenderUnitNumberPreview(DrawingContext dc, UnitNumberTool unitTool)
+    {
+        var previewPoints = unitTool.GetPreviewPoints();
+        if (previewPoints == null || previewPoints.Count == 0)
+            return;
+
+        var cadPoint = previewPoints[0];
+        var screenPoint = CadToScreen(cadPoint.X, cadPoint.Y);
+
+        string text = unitTool.CurrentText;
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        double fontSize = unitTool.TextHeight * _scale;
+        if (fontSize < 4) fontSize = 4;
+
+        var formattedText = new FormattedText(
+            text,
+            CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight,
+            new Typeface("Arial"),
+            fontSize,
+            Brushes.Cyan,
+            1.0);
+
+        // Draw text offset upward so bottom aligns with insert point (matching TextRenderer)
+        var textPosition = new WpfPoint(screenPoint.X, screenPoint.Y - formattedText.Height);
+        dc.PushOpacity(0.7);
+        dc.DrawText(formattedText, textPosition);
+        dc.Pop(); // opacity
+
+        // Draw small crosshair at placement point
+        double crossSize = 6;
+        dc.DrawLine(PreviewPen, new WpfPoint(screenPoint.X - crossSize, screenPoint.Y), new WpfPoint(screenPoint.X + crossSize, screenPoint.Y));
+        dc.DrawLine(PreviewPen, new WpfPoint(screenPoint.X, screenPoint.Y - crossSize), new WpfPoint(screenPoint.X, screenPoint.Y + crossSize));
+    }
+
+    /// <summary>
+    /// Configures the UnitNumberTool properties for preview and placement.
+    /// </summary>
+    public void ConfigureUnitNumberTool(string prefix, int nextNumber, string format, double textHeight)
+    {
+        if (_currentTool is UnitNumberTool unitTool)
+        {
+            unitTool.Prefix = prefix;
+            unitTool.NextNumber = nextNumber;
+            unitTool.FormatString = format;
+            unitTool.TextHeight = textHeight;
+            Render();
+        }
+    }
+
+    private void HandleDoubleClick(MouseButtonEventArgs e)
+    {
+        var screenPoint = e.GetPosition(this);
+        var cadPoint = ScreenToCad(screenPoint);
+
+        var entities = Entities;
+        if (entities == null)
+            return;
+
+        double tolerance = 5.0 / _scale;
+
+        Entity? hitEntity = null;
+        if (_spatialGrid != null)
+        {
+            var candidates = _spatialGrid.Query(cadPoint, tolerance);
+            foreach (var entity in candidates)
+            {
+                if (entity is MText mtext && mtext.Layer?.Name == CadDocumentModel.UnitNumbersLayerName &&
+                    HitTestHelper.HitTest(entity, cadPoint, tolerance))
+                {
+                    hitEntity = entity;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            foreach (var entity in entities)
+            {
+                if (entity is MText mtext && mtext.Layer?.Name == CadDocumentModel.UnitNumbersLayerName &&
+                    HitTestHelper.HitTest(entity, cadPoint, tolerance))
+                {
+                    hitEntity = entity;
+                    break;
+                }
+            }
+        }
+
+        if (hitEntity != null)
+        {
+            EntityDoubleClicked?.Invoke(this, new CadEntityClickEventArgs(hitEntity, false));
+            e.Handled = true;
+        }
     }
 
     private void StartPan(WpfPoint startPoint)

@@ -12,6 +12,9 @@ public class SelectionService : ISelectionService
 
     public void Select(EntityModel entity, bool addToSelection = false)
     {
+        if (entity.IsLocked)
+            return;
+
         var added = new List<EntityModel>();
         var removed = new List<EntityModel>();
 
@@ -54,6 +57,9 @@ public class SelectionService : ISelectionService
 
         foreach (var entity in entities)
         {
+            if (entity.IsLocked)
+                continue;
+
             if (_selectedEntities.Add(entity))
             {
                 entity.IsSelected = true;
@@ -93,6 +99,9 @@ public class SelectionService : ISelectionService
 
     public void ToggleSelection(EntityModel entity)
     {
+        if (entity.IsLocked)
+            return;
+
         if (_selectedEntities.Contains(entity))
         {
             Deselect(entity);

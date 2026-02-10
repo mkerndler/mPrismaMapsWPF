@@ -19,10 +19,16 @@ public class DrawingCompletedEventArgs : EventArgs
     /// </summary>
     public DrawingMode Mode { get; }
 
-    public DrawingCompletedEventArgs(IReadOnlyList<Point> points, bool isClosed, DrawingMode mode)
+    /// <summary>
+    /// Optional text associated with the drawing (e.g., unit number).
+    /// </summary>
+    public string? Text { get; }
+
+    public DrawingCompletedEventArgs(IReadOnlyList<Point> points, bool isClosed, DrawingMode mode, string? text = null)
     {
         Points = points;
         IsClosed = isClosed;
         Mode = mode;
+        Text = text;
     }
 }
