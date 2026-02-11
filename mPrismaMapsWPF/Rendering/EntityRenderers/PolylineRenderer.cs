@@ -1,6 +1,7 @@
 using System.Windows.Media;
 using ACadSharp.Entities;
 using mPrismaMapsWPF.Helpers;
+using mPrismaMapsWPF.Models;
 using WpfPoint = System.Windows.Point;
 
 namespace mPrismaMapsWPF.Rendering.EntityRenderers;
@@ -29,12 +30,13 @@ public class PolylineRenderer : IEntityRenderer
             return;
 
         var pen = GetPen(polyline, renderContext);
+        bool shouldFill = polyline.IsClosed && polyline.Layer?.Name == CadDocumentModel.UnitAreasLayerName;
         var geometry = new StreamGeometry();
 
         using (var ctx = geometry.Open())
         {
             var firstPoint = renderContext.Transform(vertices[0].Location.X, vertices[0].Location.Y);
-            ctx.BeginFigure(firstPoint, false, polyline.IsClosed);
+            ctx.BeginFigure(firstPoint, shouldFill, polyline.IsClosed);
 
             for (int i = 1; i < vertices.Count; i++)
             {
@@ -64,7 +66,15 @@ public class PolylineRenderer : IEntityRenderer
         }
 
         geometry.Freeze();
-        context.DrawGeometry(null, pen, geometry);
+
+        Brush? fillBrush = null;
+        if (shouldFill)
+        {
+            var color = ColorHelper.GetEntityColor(polyline, renderContext.DefaultColor);
+            fillBrush = RenderCache.GetBrush(Color.FromArgb(60, color.R, color.G, color.B));
+        }
+
+        context.DrawGeometry(fillBrush, pen, geometry);
     }
 
     private static void RenderBulgeArc(StreamGeometryContext ctx, WpfPoint start, WpfPoint end, double bulge, RenderContext renderContext)

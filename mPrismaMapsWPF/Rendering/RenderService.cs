@@ -1,6 +1,7 @@
 using System.Windows.Media;
 using ACadSharp.Entities;
 using mPrismaMapsWPF.Helpers;
+using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Rendering.EntityRenderers;
 
 namespace mPrismaMapsWPF.Rendering;
@@ -26,12 +27,35 @@ public class RenderService
 
     public void RenderEntities(DrawingContext context, IEnumerable<Entity> entities, RenderContext renderContext)
     {
+        // Two-pass rendering: Unit Areas first (underneath), then everything else
+        // Pass 1: Render Unit Areas layer entities
         foreach (var entity in entities)
         {
+            if (entity.Layer?.Name != CadDocumentModel.UnitAreasLayerName)
+                continue;
+
             if (!renderContext.IsLayerVisible(entity))
                 continue;
 
-            // Viewport culling - skip entities outside visible area
+            if (renderContext.ViewportBounds.HasValue)
+            {
+                var bounds = BoundingBoxHelper.GetBounds(entity);
+                if (bounds.HasValue && !renderContext.IsInViewport(bounds.Value))
+                    continue;
+            }
+
+            RenderEntity(context, entity, renderContext);
+        }
+
+        // Pass 2: Render all other entities
+        foreach (var entity in entities)
+        {
+            if (entity.Layer?.Name == CadDocumentModel.UnitAreasLayerName)
+                continue;
+
+            if (!renderContext.IsLayerVisible(entity))
+                continue;
+
             if (renderContext.ViewportBounds.HasValue)
             {
                 var bounds = BoundingBoxHelper.GetBounds(entity);

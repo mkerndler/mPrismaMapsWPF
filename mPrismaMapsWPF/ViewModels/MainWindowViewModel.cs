@@ -53,6 +53,7 @@ public partial class MainWindowViewModel : ObservableObject
     private void OnLayerVisibilityChangedForCommand(object? sender, EventArgs e)
     {
         DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
+        GenerateUnitAreasCommand.NotifyCanExecuteChanged();
     }
 
     public LayerPanelViewModel LayerPanel { get; }
@@ -506,6 +507,36 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     private bool CanDeleteHidden() => _documentService.CurrentDocument.Document != null;
+
+    [RelayCommand(CanExecute = nameof(CanGenerateUnitAreas))]
+    private void GenerateUnitAreas()
+    {
+        var hiddenLayers = LayerPanel.Layers
+            .Where(l => !l.IsVisible)
+            .Select(l => l.Name)
+            .ToHashSet();
+
+        var command = new GenerateUnitAreasCommand(_documentService.CurrentDocument, hiddenLayers);
+        _undoRedoService.Execute(command);
+
+        RefreshEntities();
+        LayerPanel.RefreshLayers();
+
+        if (command.FailedCount > 0)
+            StatusText = $"Generated {command.GeneratedCount} unit areas ({command.FailedCount} not enclosed)";
+        else
+            StatusText = $"Generated {command.GeneratedCount} unit areas";
+    }
+
+    private bool CanGenerateUnitAreas()
+    {
+        if (_documentService.CurrentDocument.Document == null)
+            return false;
+
+        return _documentService.CurrentDocument.ModelSpaceEntities
+            .OfType<MText>()
+            .Any(m => m.Layer?.Name == CadDocumentModel.UnitNumbersLayerName);
+    }
 
     [RelayCommand(CanExecute = nameof(CanDeleteOutsideViewport))]
     private void DeleteEntitiesOutsideViewport()
@@ -1010,6 +1041,7 @@ public partial class MainWindowViewModel : ObservableObject
         SaveFileAsCommand.NotifyCanExecuteChanged();
         DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
         DeleteEntitiesOutsideViewportCommand.NotifyCanExecuteChanged();
+        GenerateUnitAreasCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
         ZoomToFitRequested?.Invoke(this, EventArgs.Empty);
@@ -1029,6 +1061,7 @@ public partial class MainWindowViewModel : ObservableObject
         SaveFileAsCommand.NotifyCanExecuteChanged();
         DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
         DeleteEntitiesOutsideViewportCommand.NotifyCanExecuteChanged();
+        GenerateUnitAreasCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }
@@ -1084,6 +1117,7 @@ public partial class MainWindowViewModel : ObservableObject
         EntityCount = Entities.Count;
         EntityViewer.Refresh();
         _walkwayService.RebuildGraph(Entities);
+        GenerateUnitAreasCommand.NotifyCanExecuteChanged();
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }
 
@@ -1222,6 +1256,7 @@ public partial class MainWindowViewModel : ObservableObject
         StatusText = $"Placed unit number '{e.Text}' on layer '{CadDocumentModel.UnitNumbersLayerName}'";
         DrawingStatusText = $"Place Unit Number: Click to place '{UnitNumberPrefix}{UnitNextNumber.ToString("D3")}'";
 
+        GenerateUnitAreasCommand.NotifyCanExecuteChanged();
         EntitiesChanged?.Invoke(this, EventArgs.Empty);
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }
