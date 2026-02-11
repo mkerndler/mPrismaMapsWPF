@@ -21,6 +21,7 @@ public class CadDocumentModel
 
     public const string UserDrawingsLayerName = "User Drawings";
     public const string UnitNumbersLayerName = "Unit Numbers";
+    public const string WalkwaysLayerName = "Walkways";
 
     /// <summary>
     /// Gets or creates the "User Drawings" layer for user-created entities.
@@ -62,6 +63,29 @@ public class CadDocumentModel
         var layer = new Layer(UnitNumbersLayerName)
         {
             Color = new ACadSharp.Color(3) // Green
+        };
+
+        Document.Layers.Add(layer);
+        IsDirty = true;
+
+        return layer;
+    }
+
+    /// <summary>
+    /// Gets or creates the "Walkways" layer for walkway graph entities.
+    /// </summary>
+    public Layer? GetOrCreateWalkwaysLayer()
+    {
+        if (Document == null)
+            return null;
+
+        var existingLayer = Document.Layers.FirstOrDefault(l => l.Name == WalkwaysLayerName);
+        if (existingLayer != null)
+            return existingLayer;
+
+        var layer = new Layer(WalkwaysLayerName)
+        {
+            Color = new ACadSharp.Color(5) // Blue
         };
 
         Document.Layers.Add(layer);

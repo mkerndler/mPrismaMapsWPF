@@ -21,17 +21,20 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IDocumentService _documentService;
     private readonly ISelectionService _selectionService;
     private readonly IUndoRedoService _undoRedoService;
+    private readonly IWalkwayService _walkwayService;
     private readonly ILogger<MainWindowViewModel> _logger;
 
     public MainWindowViewModel(
         IDocumentService documentService,
         ISelectionService selectionService,
         IUndoRedoService undoRedoService,
+        IWalkwayService walkwayService,
         ILogger<MainWindowViewModel> logger)
     {
         _documentService = documentService;
         _selectionService = selectionService;
         _undoRedoService = undoRedoService;
+        _walkwayService = walkwayService;
         _logger = logger;
 
         _documentService.DocumentLoaded += OnDocumentLoaded;
@@ -141,6 +144,9 @@ public partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _unitAutoIncrement = true;
+
+    [ObservableProperty]
+    private HashSet<ulong>? _highlightedPathHandles;
 
     private List<Entity>? _clipboardEntities;
 
@@ -379,6 +385,14 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void SetDrawFairwayMode()
+    {
+        DrawingMode = DrawingMode.DrawFairway;
+        UpdateModeFlags();
+        DrawingStatusText = "Fairway: Click to place nodes, Right-click/Escape to end segment";
+    }
+
+    [RelayCommand]
     private void ToggleSnap()
     {
         IsSnapEnabled = !IsSnapEnabled;
@@ -580,6 +594,17 @@ public partial class MainWindowViewModel : ObservableObject
             return;
         }
 
+        // Cascade: if deleting walkway nodes, also delete connected edges
+        var cascaded = CollectConnectedWalkwayEdges(deletable);
+        if (cascaded.Count > 0)
+        {
+            foreach (var edge in cascaded)
+            {
+                if (!deletable.Contains(edge))
+                    deletable.Add(edge);
+            }
+        }
+
         var command = new DeleteEntitiesCommand(_documentService.CurrentDocument, deletable);
         _undoRedoService.Execute(command);
 
@@ -593,9 +618,64 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         RefreshAfterEdit();
+        _walkwayService.RebuildGraph(Entities);
 
         if (skipped > 0)
             StatusText = $"Deleted {deletable.Count} entities, {skipped} locked entity(ies) skipped";
+    }
+
+    /// <summary>
+    /// Finds walkway edge EntityModels (Lines on Walkways layer) connected to any
+    /// walkway node (Circle on Walkways layer) in the given list.
+    /// </summary>
+    private List<EntityModel> CollectConnectedWalkwayEdges(List<EntityModel> entitiesToDelete)
+    {
+        // Collect centers of walkway nodes being deleted
+        var deletedNodeCenters = new List<(double x, double y, double radius)>();
+        foreach (var em in entitiesToDelete)
+        {
+            if (em.Entity is Circle circle and not Arc &&
+                circle.Layer?.Name == CadDocumentModel.WalkwaysLayerName)
+            {
+                deletedNodeCenters.Add((circle.Center.X, circle.Center.Y, circle.Radius));
+            }
+        }
+
+        if (deletedNodeCenters.Count == 0)
+            return new List<EntityModel>();
+
+        // Find all edge lines on Walkways layer that have an endpoint near a deleted node
+        var connectedEdges = new List<EntityModel>();
+        var deletingHandles = new HashSet<ulong>(entitiesToDelete.Select(e => e.Handle));
+
+        foreach (var em in Entities)
+        {
+            if (deletingHandles.Contains(em.Handle))
+                continue;
+
+            if (em.Entity is Line line && line.Layer?.Name == CadDocumentModel.WalkwaysLayerName)
+            {
+                foreach (var (cx, cy, radius) in deletedNodeCenters)
+                {
+                    double tolerance = radius * 2;
+                    double dxStart = line.StartPoint.X - cx;
+                    double dyStart = line.StartPoint.Y - cy;
+                    double dxEnd = line.EndPoint.X - cx;
+                    double dyEnd = line.EndPoint.Y - cy;
+
+                    bool startNear = Math.Sqrt(dxStart * dxStart + dyStart * dyStart) < tolerance;
+                    bool endNear = Math.Sqrt(dxEnd * dxEnd + dyEnd * dyEnd) < tolerance;
+
+                    if (startNear || endNear)
+                    {
+                        connectedEdges.Add(em);
+                        break;
+                    }
+                }
+            }
+        }
+
+        return connectedEdges;
     }
 
     private bool CanDeleteSelected() => _selectionService.SelectedEntities.Count > 0;
@@ -710,18 +790,99 @@ public partial class MainWindowViewModel : ObservableObject
         if (selectedEntities.Count == 0)
             return;
 
+        // Collect walkway edges that need endpoint adjustment
+        var edgeAdjustments = CollectWalkwayEdgeAdjustments(selectedEntities, e.DeltaX, e.DeltaY);
+
+        // Include edge adjustments in a composite undoable operation
+        var allEntities = new List<Entity>(selectedEntities);
+        foreach (var (line, _, _) in edgeAdjustments)
+        {
+            if (!allEntities.Contains(line))
+                allEntities.Add(line);
+        }
+
+        // Move the selected entities (and any fully-selected edges)
         var command = new MoveEntitiesCommand(_documentService.CurrentDocument, selectedEntities, e.DeltaX, e.DeltaY);
         _undoRedoService.Execute(command);
 
-        // Invalidate caches for moved entities
-        foreach (var entity in selectedEntities)
+        // Adjust connected edge endpoints (only the endpoint attached to a moved node)
+        if (edgeAdjustments.Count > 0)
+        {
+            var edgeCommand = new AdjustWalkwayEdgesCommand(edgeAdjustments, e.DeltaX, e.DeltaY);
+            _undoRedoService.Execute(edgeCommand);
+        }
+
+        // Invalidate caches for all affected entities
+        foreach (var entity in allEntities)
         {
             BoundingBoxHelper.InvalidateEntity(entity.Handle);
         }
 
+        _walkwayService.RebuildGraph(Entities);
         EntitiesChanged?.Invoke(this, EventArgs.Empty);
         RenderRequested?.Invoke(this, EventArgs.Empty);
         StatusText = $"Moved {selectedEntities.Count} entities";
+    }
+
+    /// <summary>
+    /// Finds walkway edges not in the selection that have an endpoint connected to a
+    /// moved walkway node, and determines which endpoint (start/end) needs adjusting.
+    /// </summary>
+    private List<(Line line, bool adjustStart, bool adjustEnd)> CollectWalkwayEdgeAdjustments(
+        List<Entity> movedEntities, double dx, double dy)
+    {
+        // Collect pre-move centers of walkway nodes being moved
+        var movedNodeCenters = new List<(double x, double y, double radius)>();
+        var movedHandles = new HashSet<ulong>(movedEntities.Select(e => e.Handle));
+
+        foreach (var entity in movedEntities)
+        {
+            if (entity is Circle circle and not Arc &&
+                circle.Layer?.Name == CadDocumentModel.WalkwaysLayerName)
+            {
+                movedNodeCenters.Add((circle.Center.X, circle.Center.Y, circle.Radius));
+            }
+        }
+
+        if (movedNodeCenters.Count == 0)
+            return new List<(Line, bool, bool)>();
+
+        var adjustments = new List<(Line line, bool adjustStart, bool adjustEnd)>();
+
+        foreach (var em in Entities)
+        {
+            // Skip entities already in the move selection
+            if (movedHandles.Contains(em.Handle))
+                continue;
+
+            if (em.Entity is Line line && line.Layer?.Name == CadDocumentModel.WalkwaysLayerName)
+            {
+                bool adjustStart = false;
+                bool adjustEnd = false;
+
+                foreach (var (cx, cy, radius) in movedNodeCenters)
+                {
+                    double tolerance = radius * 2;
+
+                    double dsX = line.StartPoint.X - cx;
+                    double dsY = line.StartPoint.Y - cy;
+                    if (Math.Sqrt(dsX * dsX + dsY * dsY) < tolerance)
+                        adjustStart = true;
+
+                    double deX = line.EndPoint.X - cx;
+                    double deY = line.EndPoint.Y - cy;
+                    if (Math.Sqrt(deX * deX + deY * deY) < tolerance)
+                        adjustEnd = true;
+                }
+
+                if (adjustStart || adjustEnd)
+                {
+                    adjustments.Add((line, adjustStart, adjustEnd));
+                }
+            }
+        }
+
+        return adjustments;
     }
 
     [RelayCommand(CanExecute = nameof(CanSave))]
@@ -816,6 +977,9 @@ public partial class MainWindowViewModel : ObservableObject
         // Update grid spacing based on document size
         UpdateGridSpacingFromExtents();
 
+        // Rebuild walkway graph from loaded entities
+        _walkwayService.RebuildGraph(Entities);
+
         // Reset to select mode
         SetSelectMode();
 
@@ -852,6 +1016,25 @@ public partial class MainWindowViewModel : ObservableObject
         DeleteSelectedCommand.NotifyCanExecuteChanged();
         CopyCommand.NotifyCanExecuteChanged();
         LockSelectedCommand.NotifyCanExecuteChanged();
+
+        // Update path highlighting for selected unit numbers
+        UpdatePathHighlightsForSelection(e.SelectedEntities);
+    }
+
+    private void UpdatePathHighlightsForSelection(IReadOnlyCollection<EntityModel> selectedEntities)
+    {
+        if (selectedEntities.Count == 1 &&
+            selectedEntities.First().Entity is MText mtext &&
+            mtext.Layer?.Name == CadDocumentModel.UnitNumbersLayerName)
+        {
+            var highlights = _walkwayService.GetPathHighlightsForUnit(
+                mtext.InsertPoint.X, mtext.InsertPoint.Y);
+            HighlightedPathHandles = highlights;
+        }
+        else
+        {
+            HighlightedPathHandles = null;
+        }
     }
 
     /// <summary>
@@ -877,6 +1060,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         EntityCount = Entities.Count;
         EntityViewer.Refresh();
+        _walkwayService.RebuildGraph(Entities);
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }
 
@@ -888,6 +1072,12 @@ public partial class MainWindowViewModel : ObservableObject
         if (e.Mode == DrawingMode.PlaceUnitNumber)
         {
             HandlePlaceUnitNumber(e);
+            return;
+        }
+
+        if (e.Mode == DrawingMode.DrawFairway)
+        {
+            HandleFairwayPlacement(e);
             return;
         }
 
@@ -1011,6 +1201,120 @@ public partial class MainWindowViewModel : ObservableObject
 
         EntitiesChanged?.Invoke(this, EventArgs.Empty);
         RenderRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    public double ComputeWalkwayNodeRadius()
+    {
+        var extents = _documentService.CurrentDocument.GetExtents();
+        if (extents.IsValid)
+        {
+            double maxDim = Math.Max(extents.Width, extents.Height);
+            return Math.Max(maxDim * 0.003, 0.5);
+        }
+        return 2.0;
+    }
+
+    private void HandleFairwayPlacement(DrawingCompletedEventArgs e)
+    {
+        if (e.Points.Count < 1)
+            return;
+
+        _documentService.CurrentDocument.EnsureDocumentExists();
+
+        var nodePoint = e.Points[^1]; // Last point is the current node
+        double? prevX = null, prevY = null;
+
+        if (e.Points.Count >= 2)
+        {
+            prevX = e.Points[0].X;
+            prevY = e.Points[0].Y;
+        }
+
+        double nodeRadius = ComputeWalkwayNodeRadius();
+
+        var command = new AddWalkwaySegmentCommand(
+            _documentService.CurrentDocument,
+            nodePoint.X, nodePoint.Y,
+            nodeRadius,
+            e.SnappedToHandle,
+            prevX, prevY,
+            e.PreviousNodeHandle);
+
+        _undoRedoService.Execute(command);
+
+        // Add created entities to our collection
+        var doc = _documentService.CurrentDocument;
+        if (doc.Document != null)
+        {
+            foreach (var entity in doc.ModelSpaceEntities)
+            {
+                if (!_entityLookup.ContainsKey(entity))
+                {
+                    var model = new EntityModel(entity);
+                    _entityLookup[entity] = model;
+                    Entities.Add(model);
+                }
+            }
+        }
+
+        EntityCount = Entities.Count;
+        LayerPanel.RefreshLayers();
+        _walkwayService.RebuildGraph(Entities);
+
+        StatusText = "Added walkway segment";
+        EntitiesChanged?.Invoke(this, EventArgs.Empty);
+        RenderRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void HandleToggleEntrance(ulong handle)
+    {
+        var doc = _documentService.CurrentDocument;
+        if (doc.Document == null)
+            return;
+
+        var entity = doc.ModelSpaceEntities
+            .OfType<Circle>()
+            .FirstOrDefault(c => c.Handle == handle);
+
+        if (entity == null)
+            return;
+
+        var command = new ToggleEntranceCommand(entity);
+        _undoRedoService.Execute(command);
+
+        _walkwayService.RebuildGraph(Entities);
+
+        bool isEntrance = entity.Color.Index == 3;
+        StatusText = isEntrance ? "Node set as entrance" : "Node set as regular";
+        RenderRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Returns the existing walkway node positions for FairwayTool snapping.
+    /// </summary>
+    public List<(ulong handle, double x, double y)> GetWalkwayNodes()
+    {
+        var nodes = new List<(ulong, double, double)>();
+        foreach (var em in Entities)
+        {
+            if (em.Entity is Circle circle and not Arc &&
+                circle.Layer?.Name == CadDocumentModel.WalkwaysLayerName)
+            {
+                nodes.Add((circle.Handle, circle.Center.X, circle.Center.Y));
+            }
+        }
+        return nodes;
+    }
+
+    public double GetWalkwaySnapDistance()
+    {
+        var extents = _documentService.CurrentDocument.GetExtents();
+        if (extents.IsValid)
+        {
+            double maxDim = Math.Max(extents.Width, extents.Height);
+            return Math.Max(maxDim * 0.01, 2.0);
+        }
+        return 5.0;
     }
 
     public void EditUnitNumber(MText entity)

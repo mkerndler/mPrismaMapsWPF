@@ -52,6 +52,7 @@ public partial class MainWindow : Window
         CadCanvas.DrawingCompleted += OnDrawingCompleted;
         CadCanvas.MarqueeSelectionCompleted += OnMarqueeSelectionCompleted;
         CadCanvas.MoveCompleted += OnMoveCompleted;
+        CadCanvas.ToggleEntranceRequested += OnToggleEntranceRequested;
 
         _viewModel.EditUnitNumberRequested += OnEditUnitNumberRequested;
 
@@ -89,6 +90,19 @@ public partial class MainWindow : Window
                 "D3",
                 _viewModel.UnitTextHeight);
         }
+        else if (e.PropertyName == nameof(MainWindowViewModel.HighlightedPathHandles))
+        {
+            CadCanvas.HighlightedPathHandles = _viewModel.HighlightedPathHandles;
+        }
+        else if (e.PropertyName == nameof(MainWindowViewModel.DrawingMode) &&
+                 _viewModel.DrawingMode == Drawing.DrawingMode.DrawFairway)
+        {
+            // Configure fairway tool with existing nodes for snapping
+            CadCanvas.ConfigureFairwayTool(
+                _viewModel.GetWalkwayNodes(),
+                _viewModel.GetWalkwaySnapDistance(),
+                _viewModel.ComputeWalkwayNodeRadius());
+        }
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -109,6 +123,21 @@ public partial class MainWindow : Window
     private void OnDrawingCompleted(object? sender, DrawingCompletedEventArgs e)
     {
         _viewModel.OnDrawingCompleted(e);
+        UpdateCanvasBindings();
+
+        // After fairway placement, update the tool's existing nodes for snapping
+        if (e.Mode == Drawing.DrawingMode.DrawFairway)
+        {
+            CadCanvas.ConfigureFairwayTool(
+                _viewModel.GetWalkwayNodes(),
+                _viewModel.GetWalkwaySnapDistance(),
+                _viewModel.ComputeWalkwayNodeRadius());
+        }
+    }
+
+    private void OnToggleEntranceRequested(object? sender, Controls.ToggleEntranceEventArgs e)
+    {
+        _viewModel.HandleToggleEntrance(e.Handle);
         UpdateCanvasBindings();
     }
 

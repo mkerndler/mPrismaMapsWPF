@@ -114,6 +114,8 @@
         <KeyBinding Key="Z" Command="{Binding SetZoomToAreaModeCommand}"/>
         <!-- Place Unit Number -->
         <KeyBinding Key="N" Command="{Binding SetPlaceUnitNumberModeCommand}"/>
+        <!-- Draw Fairway -->
+        <KeyBinding Key="F" Command="{Binding SetDrawFairwayModeCommand}"/>
         <!-- Lock -->
         <KeyBinding Key="L" Modifiers="Ctrl" Command="{Binding LockSelectedCommand}"/>
         <!-- View transform shortcuts -->
@@ -207,6 +209,7 @@
             </MenuItem>
             <MenuItem Header="_Tools">
                 <MenuItem Header="Place _Unit Number" Command="{Binding SetPlaceUnitNumberModeCommand}" InputGestureText="N"/>
+                <MenuItem Header="Draw _Fairway" Command="{Binding SetDrawFairwayModeCommand}" InputGestureText="F"/>
                 <Separator/>
                 <MenuItem Header="_Delete Hidden Entities" Command="{Binding DeleteHiddenEntitiesCommand}" ToolTip="Delete all hidden/invisible entities"/>
                 <MenuItem Header="Delete Entities _Outside Viewport" Command="{Binding DeleteEntitiesOutsideViewportCommand}" ToolTip="Delete all entities outside the current view"/>
@@ -324,6 +327,13 @@
                               ToolTip="Auto-increment unit number">
                     <TextBlock Text="A+" FontSize="10" FontWeight="Bold"/>
                 </ToggleButton>
+                <Separator Margin="8,4"/>
+                <!-- Fairway Tool -->
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding SetDrawFairwayModeCommand}"
+                        ToolTip="Draw Fairway (F)">
+                    <TextBlock Text="&#x2442;" FontSize="16"/>
+                </Button>
                 <Separator Margin="8,4"/>
                 <!-- Snap and Grid -->
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"

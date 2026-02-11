@@ -263,12 +263,35 @@ public class CadCanvas : FrameworkElement
         set => SetValue(ViewRotationProperty, value);
     }
 
+    public static readonly DependencyProperty HighlightedPathHandlesProperty =
+        DependencyProperty.Register(
+            nameof(HighlightedPathHandles),
+            typeof(HashSet<ulong>),
+            typeof(CadCanvas),
+            new PropertyMetadata(null, OnHighlightedPathHandlesChanged));
+
+    public HashSet<ulong>? HighlightedPathHandles
+    {
+        get => (HashSet<ulong>?)GetValue(HighlightedPathHandlesProperty);
+        set => SetValue(HighlightedPathHandlesProperty, value);
+    }
+
+    private static void OnHighlightedPathHandlesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas canvas)
+        {
+            canvas.InvalidateCache();
+            canvas.Render();
+        }
+    }
+
     public event EventHandler<CadMouseEventArgs>? CadMouseMove;
     public event EventHandler<CadEntityClickEventArgs>? EntityClicked;
     public event EventHandler<CadEntityClickEventArgs>? EntityDoubleClicked;
     public event EventHandler<DrawingCompletedEventArgs>? DrawingCompleted;
     public event EventHandler<MarqueeSelectionEventArgs>? MarqueeSelectionCompleted;
     public event EventHandler<MoveCompletedEventArgs>? MoveCompleted;
+    public event EventHandler<ToggleEntranceEventArgs>? ToggleEntranceRequested;
 
     public double Scale
     {
@@ -515,6 +538,9 @@ public class CadCanvas : FrameworkElement
         // Draw selection overlay
         RenderSelectionOverlay(dc, entities);
 
+        // Draw path highlight overlay
+        RenderPathHighlight(dc, entities);
+
         // Draw grid (on top of entities but below preview)
         RenderGrid(dc);
 
@@ -619,6 +645,14 @@ public class CadCanvas : FrameworkElement
 
     private void RenderDrawingPreview(DrawingContext dc)
     {
+        // Fairway tool always shows preview (even when not IsDrawing, for the cursor circle)
+        if (_currentTool is FairwayTool)
+        {
+            RenderFairwayPreview(dc);
+            if (!_currentTool.IsDrawing)
+                return;
+        }
+
         if (_currentTool == null || !_currentTool.IsDrawing)
             return;
 
@@ -628,6 +662,10 @@ public class CadCanvas : FrameworkElement
             RenderUnitNumberPreview(dc, unitTool);
             return;
         }
+
+        // FairwayTool preview is handled above
+        if (_currentTool is FairwayTool)
+            return;
 
         var previewPoints = _currentTool.GetPreviewPoints();
         if (previewPoints == null || previewPoints.Count < 2)
@@ -975,6 +1013,11 @@ public class CadCanvas : FrameworkElement
                (entity.Layer != null && _lockedLayersSet.Contains(entity.Layer.Name));
     }
 
+    private static bool IsWalkwayEdge(Entity entity)
+    {
+        return entity is Line && entity.Layer?.Name == Models.CadDocumentModel.WalkwaysLayerName;
+    }
+
     private static void OnExtentsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is CadCanvas canvas && e.NewValue is Extents extents)
@@ -1035,6 +1078,7 @@ public class CadCanvas : FrameworkElement
             DrawingMode.DrawPolygon => new PolygonTool(),
             DrawingMode.ZoomToArea => new ZoomAreaTool(),
             DrawingMode.PlaceUnitNumber => new UnitNumberTool(),
+            DrawingMode.DrawFairway => new FairwayTool(),
             _ => null
         };
 
@@ -1045,8 +1089,13 @@ public class CadCanvas : FrameworkElement
     {
         DrawingCompleted?.Invoke(this, e);
 
-        // Reset tool for next drawing
-        _currentTool?.Reset();
+        // FairwayTool fires Completed per-click (not once at end),
+        // so don't reset it — it manages its own state via EndSegment/Reset.
+        if (_currentTool is not FairwayTool)
+        {
+            _currentTool?.Reset();
+        }
+
         Render();
     }
 
@@ -1060,7 +1109,7 @@ public class CadCanvas : FrameworkElement
         Cursor = DrawingMode switch
         {
             DrawingMode.Pan => Cursors.Hand,
-            DrawingMode.DrawLine or DrawingMode.DrawPolyline or DrawingMode.DrawPolygon or DrawingMode.ZoomToArea or DrawingMode.PlaceUnitNumber => Cursors.Cross,
+            DrawingMode.DrawLine or DrawingMode.DrawPolyline or DrawingMode.DrawPolygon or DrawingMode.ZoomToArea or DrawingMode.PlaceUnitNumber or DrawingMode.DrawFairway => Cursors.Cross,
             _ => Cursors.Arrow
         };
     }
@@ -1227,7 +1276,7 @@ public class CadCanvas : FrameworkElement
             var candidates = _spatialGrid.Query(cadPoint, tolerance);
             foreach (var entity in candidates)
             {
-                if (HitTestHelper.HitTest(entity, cadPoint, tolerance) && !IsEntityLocked(entity))
+                if (HitTestHelper.HitTest(entity, cadPoint, tolerance) && !IsEntityLocked(entity) && !IsWalkwayEdge(entity))
                 {
                     hitEntity = entity;
                     break;
@@ -1239,7 +1288,7 @@ public class CadCanvas : FrameworkElement
             // Fallback: linear scan
             foreach (var entity in entities)
             {
-                if (HitTestHelper.HitTest(entity, cadPoint, tolerance) && !IsEntityLocked(entity))
+                if (HitTestHelper.HitTest(entity, cadPoint, tolerance) && !IsEntityLocked(entity) && !IsWalkwayEdge(entity))
                 {
                     hitEntity = entity;
                     break;
@@ -1321,6 +1370,12 @@ public class CadCanvas : FrameworkElement
             return;
         }
 
+        // Check for walkway context menu in select mode
+        if (DrawingMode == DrawingMode.Select && HandleRightClickContextMenu(screenPoint))
+        {
+            return;
+        }
+
         StartPan(screenPoint);
     }
 
@@ -1341,7 +1396,7 @@ public class CadCanvas : FrameworkElement
         CadMouseMove?.Invoke(this, new CadMouseEventArgs(cadPoint.X, cadPoint.Y));
 
         // Update drawing tool preview
-        if (_currentTool != null && _currentTool.IsDrawing)
+        if (_currentTool != null && (_currentTool.IsDrawing || _currentTool is FairwayTool))
         {
             _currentTool.OnMouseMove(cadPoint);
             Render();
@@ -1429,8 +1484,8 @@ public class CadCanvas : FrameworkElement
                 HiddenLayers.Any(l => l == entity.Layer.Name))
                 continue;
 
-            // Skip locked entities
-            if (IsEntityLocked(entity))
+            // Skip locked entities and walkway edges
+            if (IsEntityLocked(entity) || IsWalkwayEdge(entity))
                 continue;
 
             var bounds = BoundingBoxHelper.GetBounds(entity);
@@ -1575,6 +1630,119 @@ public class CadCanvas : FrameworkElement
         }
     }
 
+    private void RenderPathHighlight(DrawingContext dc, IEnumerable<Entity> entities)
+    {
+        var highlights = HighlightedPathHandles;
+        if (highlights == null || highlights.Count == 0 || _entityByHandle == null)
+            return;
+
+        var highlightPen = new Pen(Brushes.Orange, 3.0);
+        highlightPen.Freeze();
+        var highlightBrush = Brushes.Orange;
+
+        var renderContext = new RenderContext
+        {
+            Scale = _scale,
+            Offset = _offset,
+            DefaultColor = Colors.Orange,
+            LineThickness = 3.0,
+            ShowSelection = false,
+            ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds()
+        };
+
+        var highlightedEntities = new List<Entity>();
+        foreach (var handle in highlights)
+        {
+            if (_entityByHandle.TryGetValue(handle, out var entity))
+                highlightedEntities.Add(entity);
+        }
+
+        _renderService.RenderEntities(dc, highlightedEntities, renderContext);
+    }
+
+    private void RenderFairwayPreview(DrawingContext dc)
+    {
+        if (_currentTool is not FairwayTool fairwayTool)
+            return;
+
+        // Draw rubber-band line from last node to cursor
+        var previewPoints = fairwayTool.GetPreviewPoints();
+        if (previewPoints != null && previewPoints.Count >= 2)
+        {
+            var screenPoints = previewPoints.Select(p => CadToScreen(p.X, p.Y)).ToList();
+            dc.DrawLine(PreviewPen, screenPoints[0], screenPoints[1]);
+        }
+
+        // Draw circle preview at cursor position
+        var cursorScreen = CadToScreen(_currentCadPoint.X, _currentCadPoint.Y);
+        double screenRadius = fairwayTool.NodeRadius * _scale;
+        if (screenRadius < 4) screenRadius = 4;
+        if (screenRadius > 20) screenRadius = 20;
+        dc.DrawEllipse(null, PreviewPen, cursorScreen, screenRadius, screenRadius);
+
+        // Draw crosshair at cursor
+        double crossSize = 8;
+        dc.DrawLine(PreviewPen, new WpfPoint(cursorScreen.X - crossSize, cursorScreen.Y), new WpfPoint(cursorScreen.X + crossSize, cursorScreen.Y));
+        dc.DrawLine(PreviewPen, new WpfPoint(cursorScreen.X, cursorScreen.Y - crossSize), new WpfPoint(cursorScreen.X, cursorScreen.Y + crossSize));
+    }
+
+    /// <summary>
+    /// Configures the FairwayTool with existing walkway node positions for snapping.
+    /// </summary>
+    public void ConfigureFairwayTool(List<(ulong handle, double x, double y)> existingNodes, double snapDistance = 5.0, double nodeRadius = 2.0)
+    {
+        if (_currentTool is FairwayTool fairwayTool)
+        {
+            fairwayTool.SetExistingNodes(existingNodes);
+            fairwayTool.SnapDistance = snapDistance;
+            fairwayTool.NodeRadius = nodeRadius;
+        }
+    }
+
+    private bool HandleRightClickContextMenu(WpfPoint screenPoint)
+    {
+        if (DrawingMode != DrawingMode.Select)
+            return false;
+
+        var cadPoint = ScreenToCad(screenPoint);
+        double tolerance = 5.0 / _scale;
+
+        Entity? hitEntity = null;
+        if (_spatialGrid != null)
+        {
+            var candidates = _spatialGrid.Query(cadPoint, tolerance);
+            foreach (var entity in candidates)
+            {
+                if (entity is Circle circle and not Arc &&
+                    circle.Layer?.Name == Models.CadDocumentModel.WalkwaysLayerName &&
+                    HitTestHelper.HitTest(entity, cadPoint, tolerance))
+                {
+                    hitEntity = entity;
+                    break;
+                }
+            }
+        }
+
+        if (hitEntity is Circle walkwayCircle)
+        {
+            var contextMenu = new System.Windows.Controls.ContextMenu();
+            var toggleItem = new System.Windows.Controls.MenuItem
+            {
+                Header = walkwayCircle.Color.Index == 3 ? "Set as Regular Node" : "Set as Entrance"
+            };
+            toggleItem.Click += (_, _) =>
+            {
+                ToggleEntranceRequested?.Invoke(this, new ToggleEntranceEventArgs(walkwayCircle.Handle));
+            };
+            contextMenu.Items.Add(toggleItem);
+            contextMenu.PlacementTarget = this;
+            contextMenu.IsOpen = true;
+            return true;
+        }
+
+        return false;
+    }
+
     private void StartPan(WpfPoint startPoint)
     {
         _isPanning = true;
@@ -1640,5 +1808,15 @@ public class MoveCompletedEventArgs : EventArgs
     {
         DeltaX = deltaX;
         DeltaY = deltaY;
+    }
+}
+
+public class ToggleEntranceEventArgs : EventArgs
+{
+    public ulong Handle { get; }
+
+    public ToggleEntranceEventArgs(ulong handle)
+    {
+        Handle = handle;
     }
 }
