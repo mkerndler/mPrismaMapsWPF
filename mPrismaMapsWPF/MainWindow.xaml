@@ -103,6 +103,8 @@
         <KeyBinding Key="Home" Command="{Binding ZoomToFitCommand}"/>
         <!-- Drawing shortcuts -->
         <KeyBinding Key="L" Command="{Binding SetDrawLineModeCommand}"/>
+        <KeyBinding Key="P" Modifiers="Shift" Command="{Binding SetDrawPolylineModeCommand}"/>
+        <KeyBinding Key="G" Command="{Binding SetDrawPolygonModeCommand}"/>
         <KeyBinding Key="P" Command="{Binding SetPanModeCommand}"/>
         <KeyBinding Key="V" Command="{Binding SetSelectModeCommand}"/>
         <KeyBinding Key="F7" Command="{Binding ToggleGridCommand}"/>
@@ -208,6 +210,10 @@
                 <MenuItem Header="Reset All _Transforms" Command="{Binding ResetViewTransformsCommand}"/>
             </MenuItem>
             <MenuItem Header="_Tools">
+                <MenuItem Header="Draw _Line" Command="{Binding SetDrawLineModeCommand}" InputGestureText="L"/>
+                <MenuItem Header="Draw _Polyline" Command="{Binding SetDrawPolylineModeCommand}" InputGestureText="Shift+P"/>
+                <MenuItem Header="Draw Poly_gon" Command="{Binding SetDrawPolygonModeCommand}" InputGestureText="G"/>
+                <Separator/>
                 <MenuItem Header="Place _Unit Number" Command="{Binding SetPlaceUnitNumberModeCommand}" InputGestureText="N"/>
                 <MenuItem Header="Draw _Fairway" Command="{Binding SetDrawFairwayModeCommand}" InputGestureText="F"/>
                 <Separator/>
@@ -276,28 +282,32 @@
                 </ToggleButton>
                 <Separator Margin="8,4"/>
                 <!-- Drawing Tools -->
-                <Button Style="{StaticResource ToolbarButtonStyle}"
-                        Command="{Binding SetDrawLineModeCommand}"
-                        ToolTip="Draw Line (L)">
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding IsDrawLineMode, Mode=OneWay}"
+                              Command="{Binding SetDrawLineModeCommand}"
+                              ToolTip="Draw Line (L)">
                     <TextBlock Text="/" FontSize="18" FontWeight="Bold"/>
-                </Button>
-                <Button Style="{StaticResource ToolbarButtonStyle}"
-                        Command="{Binding SetDrawPolylineModeCommand}"
-                        ToolTip="Draw Polyline">
+                </ToggleButton>
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding IsDrawPolylineMode, Mode=OneWay}"
+                              Command="{Binding SetDrawPolylineModeCommand}"
+                              ToolTip="Draw Polyline (Shift+P)">
                     <TextBlock Text="&#x2571;&#x2572;" FontSize="12"/>
-                </Button>
-                <Button Style="{StaticResource ToolbarButtonStyle}"
-                        Command="{Binding SetDrawPolygonModeCommand}"
-                        ToolTip="Draw Polygon">
+                </ToggleButton>
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding IsDrawPolygonMode, Mode=OneWay}"
+                              Command="{Binding SetDrawPolygonModeCommand}"
+                              ToolTip="Draw Polygon (G)">
                     <TextBlock Text="&#x2B21;" FontSize="16"/>
-                </Button>
+                </ToggleButton>
                 <Separator Margin="8,4"/>
                 <!-- Unit Number Tool -->
-                <Button Style="{StaticResource ToolbarButtonStyle}"
-                        Command="{Binding SetPlaceUnitNumberModeCommand}"
-                        ToolTip="Place Unit Number (N)">
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding IsPlaceUnitNumberMode, Mode=OneWay}"
+                              Command="{Binding SetPlaceUnitNumberModeCommand}"
+                              ToolTip="Place Unit Number (N)">
                     <TextBlock Text="#" FontSize="16" FontWeight="Bold"/>
-                </Button>
+                </ToggleButton>
                 <TextBlock Text="Pfx:" Foreground="#FF888888" VerticalAlignment="Center" Margin="4,0,2,0" FontSize="10"/>
                 <TextBox Text="{Binding UnitNumberPrefix, UpdateSourceTrigger=PropertyChanged}"
                          Width="40" Height="24"
@@ -315,7 +325,7 @@
                          Padding="2,0"
                          ToolTip="Next unit number"/>
                 <TextBlock Text="H:" Foreground="#FF888888" VerticalAlignment="Center" Margin="4,0,2,0" FontSize="10"/>
-                <TextBox Text="{Binding UnitTextHeight, UpdateSourceTrigger=LostFocus}"
+                <TextBox Text="{Binding UnitTextHeight, UpdateSourceTrigger=PropertyChanged}"
                          Width="40" Height="24"
                          Background="#FF3C3C3C" Foreground="White"
                          BorderBrush="#FF555555"
@@ -329,11 +339,12 @@
                 </ToggleButton>
                 <Separator Margin="8,4"/>
                 <!-- Fairway Tool -->
-                <Button Style="{StaticResource ToolbarButtonStyle}"
-                        Command="{Binding SetDrawFairwayModeCommand}"
-                        ToolTip="Draw Fairway (F)">
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding IsDrawFairwayMode, Mode=OneWay}"
+                              Command="{Binding SetDrawFairwayModeCommand}"
+                              ToolTip="Draw Fairway (F)">
                     <TextBlock Text="&#x2442;" FontSize="16"/>
-                </Button>
+                </ToggleButton>
                 <Separator Margin="8,4"/>
                 <!-- Snap and Grid -->
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"

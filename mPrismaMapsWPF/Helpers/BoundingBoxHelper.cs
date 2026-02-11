@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using System.Windows;
 using ACadSharp.Entities;
 using Point = ACadSharp.Entities.Point;
@@ -128,28 +129,40 @@ public static class BoundingBoxHelper
 
     private static Rect GetTextBounds(TextEntity text)
     {
-        double width = string.IsNullOrEmpty(text.Value) ? 0 : text.Value.Length * text.Height * 0.6;
+        double width = string.IsNullOrEmpty(text.Value) ? 0 : Math.Max(text.Value.Length * text.Height * 0.6, text.Height);
         double height = text.Height;
 
+        // Text renders upward from insert point
         return new Rect(
             text.InsertPoint.X,
-            text.InsertPoint.Y - height,
+            text.InsertPoint.Y,
             width,
-            height * 2);
+            height);
     }
 
     private static Rect GetMTextBounds(MText mtext)
     {
+        string cleanText = string.IsNullOrEmpty(mtext.Value) ? "" : StripMTextFormatting(mtext.Value);
         double width = mtext.RectangleWidth > 0
             ? mtext.RectangleWidth
-            : (string.IsNullOrEmpty(mtext.Value) ? 0 : mtext.Value.Length * mtext.Height * 0.6);
-        double height = mtext.Height * (mtext.Value?.Count(c => c == '\n') + 1 ?? 1);
+            : Math.Max(cleanText.Length * mtext.Height * 0.6, mtext.Height);
+        int lineCount = cleanText.Count(c => c == '\n') + 1;
+        double height = mtext.Height * lineCount;
 
+        // Text renders upward from insert point
         return new Rect(
             mtext.InsertPoint.X,
-            mtext.InsertPoint.Y - height,
+            mtext.InsertPoint.Y,
             width,
-            height * 2);
+            height);
+    }
+
+    private static string StripMTextFormatting(string mtext)
+    {
+        var result = Regex.Replace(mtext, @"\\[A-Za-z][^;]*;", "");
+        result = Regex.Replace(result, @"\{|\}", "");
+        result = result.Replace("\\P", "\n");
+        return result;
     }
 
     private static Rect GetInsertBounds(Insert insert)

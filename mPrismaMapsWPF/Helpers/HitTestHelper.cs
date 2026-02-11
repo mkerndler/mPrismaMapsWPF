@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using ACadSharp.Entities;
 using WpfPoint = System.Windows.Point;
 
@@ -100,12 +101,16 @@ public static class HitTestHelper
 
     private static bool HitTestText(TextEntity text, WpfPoint point, double tolerance)
     {
-        double width = text.Value.Length * text.Height * 0.6;
+        if (string.IsNullOrEmpty(text.Value))
+            return false;
+
+        double width = Math.Max(text.Value.Length * text.Height * 0.6, text.Height);
         double height = text.Height;
 
         double x = text.InsertPoint.X;
         double y = text.InsertPoint.Y;
 
+        // Text renders upward from insert point (insert point is baseline/bottom)
         return point.X >= x - tolerance &&
                point.X <= x + width + tolerance &&
                point.Y >= y - tolerance &&
@@ -114,16 +119,33 @@ public static class HitTestHelper
 
     private static bool HitTestMText(MText mtext, WpfPoint point, double tolerance)
     {
-        double width = mtext.RectangleWidth > 0 ? mtext.RectangleWidth : mtext.Value.Length * mtext.Height * 0.6;
-        double height = mtext.Height * (mtext.Value.Count(c => c == '\n') + 1);
+        if (string.IsNullOrEmpty(mtext.Value))
+            return false;
+
+        // Strip formatting codes to get actual visible text length
+        string cleanText = StripMTextFormatting(mtext.Value);
+        double width = mtext.RectangleWidth > 0
+            ? mtext.RectangleWidth
+            : Math.Max(cleanText.Length * mtext.Height * 0.6, mtext.Height);
+        int lineCount = cleanText.Count(c => c == '\n') + 1;
+        double height = mtext.Height * lineCount;
 
         double x = mtext.InsertPoint.X;
         double y = mtext.InsertPoint.Y;
 
+        // Text renders upward from insert point (insert point is baseline/bottom)
         return point.X >= x - tolerance &&
                point.X <= x + width + tolerance &&
-               point.Y >= y - tolerance - height &&
-               point.Y <= y + tolerance;
+               point.Y >= y - tolerance &&
+               point.Y <= y + height + tolerance;
+    }
+
+    private static string StripMTextFormatting(string mtext)
+    {
+        var result = Regex.Replace(mtext, @"\\[A-Za-z][^;]*;", "");
+        result = Regex.Replace(result, @"\{|\}", "");
+        result = result.Replace("\\P", "\n");
+        return result;
     }
 
     private static bool HitTestInsert(Insert insert, WpfPoint point, double tolerance)

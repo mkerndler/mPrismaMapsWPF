@@ -93,6 +93,21 @@ public partial class MainWindowViewModel : ObservableObject
     private bool _isSelectMode = true;
 
     [ObservableProperty]
+    private bool _isDrawLineMode;
+
+    [ObservableProperty]
+    private bool _isDrawPolylineMode;
+
+    [ObservableProperty]
+    private bool _isDrawPolygonMode;
+
+    [ObservableProperty]
+    private bool _isPlaceUnitNumberMode;
+
+    [ObservableProperty]
+    private bool _isDrawFairwayMode;
+
+    [ObservableProperty]
     private bool _canUndo;
 
     [ObservableProperty]
@@ -524,6 +539,11 @@ public partial class MainWindowViewModel : ObservableObject
     {
         IsPanMode = DrawingMode == DrawingMode.Pan;
         IsSelectMode = DrawingMode == DrawingMode.Select;
+        IsDrawLineMode = DrawingMode == DrawingMode.DrawLine;
+        IsDrawPolylineMode = DrawingMode == DrawingMode.DrawPolyline;
+        IsDrawPolygonMode = DrawingMode == DrawingMode.DrawPolygon;
+        IsPlaceUnitNumberMode = DrawingMode == DrawingMode.PlaceUnitNumber;
+        IsDrawFairwayMode = DrawingMode == DrawingMode.DrawFairway;
 
         if (DrawingMode == DrawingMode.Select || DrawingMode == DrawingMode.Pan)
         {
@@ -977,6 +997,9 @@ public partial class MainWindowViewModel : ObservableObject
         // Update grid spacing based on document size
         UpdateGridSpacingFromExtents();
 
+        // Auto-scale unit text height based on document extents
+        UpdateUnitTextHeightFromExtents();
+
         // Rebuild walkway graph from loaded entities
         _walkwayService.RebuildGraph(Entities);
 
@@ -1342,6 +1365,16 @@ public partial class MainWindowViewModel : ObservableObject
             double maxDimension = Math.Max(extents.Width, extents.Height);
             double autoSpacing = GridSnapSettings.CalculateAutoGridSpacing(maxDimension);
             GridSpacing = autoSpacing;
+        }
+    }
+
+    private void UpdateUnitTextHeightFromExtents()
+    {
+        var extents = _documentService.CurrentDocument.GetExtents();
+        if (extents.IsValid)
+        {
+            double maxDim = Math.Max(extents.Width, extents.Height);
+            UnitTextHeight = Math.Max(maxDim * 0.005, 1.0);
         }
     }
 
