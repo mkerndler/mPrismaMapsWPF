@@ -55,6 +55,7 @@ public partial class MainWindow : Window
         CadCanvas.ToggleEntranceRequested += OnToggleEntranceRequested;
 
         _viewModel.EditUnitNumberRequested += OnEditUnitNumberRequested;
+        _viewModel.ExportMpolRequested += OnExportMpolRequested;
 
         // Set up drawing mode binding
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
@@ -628,6 +629,33 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() == true)
         {
             e.NewValue = dialog.UnitNumberValue;
+            e.Cancelled = false;
+        }
+    }
+
+    private void OnExportMpolRequested(object? sender, ExportMpolRequestedEventArgs e)
+    {
+        var nameDialog = new ExportMpolDialog(e.StoreName)
+        {
+            Owner = this
+        };
+
+        if (nameDialog.ShowDialog() != true)
+            return;
+
+        e.StoreName = nameDialog.StoreName;
+
+        var saveDialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Filter = "JSON Files (*.json)|*.json",
+            FilterIndex = 1,
+            Title = "Export MPOL",
+            FileName = nameDialog.StoreName + ".json"
+        };
+
+        if (saveDialog.ShowDialog() == true)
+        {
+            e.FilePath = saveDialog.FileName;
             e.Cancelled = false;
         }
     }

@@ -192,6 +192,7 @@ public partial class MainWindowViewModel : ObservableObject
     public event EventHandler<ZoomToEntityEventArgs>? ZoomToEntityRequested;
     public event EventHandler<ZoomToAreaEventArgs>? ZoomToAreaRequested;
     public event EventHandler<EditUnitNumberRequestedEventArgs>? EditUnitNumberRequested;
+    public event EventHandler<ExportMpolRequestedEventArgs>? ExportMpolRequested;
 
     [RelayCommand]
     private async Task OpenFileAsync()
@@ -560,6 +561,31 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     private bool CanGenerateBackgroundContours() => _documentService.CurrentDocument.Document != null;
+
+    [RelayCommand(CanExecute = nameof(CanExportMpol))]
+    private void ExportMpol()
+    {
+        var args = new ExportMpolRequestedEventArgs(
+            _documentService.CurrentDocument.FilePath);
+        ExportMpolRequested?.Invoke(this, args);
+
+        if (args.Cancelled)
+            return;
+
+        var hiddenLayers = LayerPanel.Layers
+            .Where(l => !l.IsVisible)
+            .Select(l => l.Name)
+            .ToHashSet();
+
+        var exportService = new Services.MpolExportService(_walkwayService);
+        var map = exportService.Export(_documentService.CurrentDocument, args.StoreName, hiddenLayers);
+
+        Services.MpolExportService.SerializeToFile(map, args.FilePath!);
+
+        StatusText = $"Exported {map.Units.Count} units to {System.IO.Path.GetFileName(args.FilePath)}";
+    }
+
+    private bool CanExportMpol() => _documentService.CurrentDocument.Document != null;
 
     [RelayCommand(CanExecute = nameof(CanDeleteOutsideViewport))]
     private void DeleteEntitiesOutsideViewport()
@@ -1066,6 +1092,7 @@ public partial class MainWindowViewModel : ObservableObject
         DeleteEntitiesOutsideViewportCommand.NotifyCanExecuteChanged();
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
         GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
+        ExportMpolCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
         ZoomToFitRequested?.Invoke(this, EventArgs.Empty);
@@ -1087,6 +1114,7 @@ public partial class MainWindowViewModel : ObservableObject
         DeleteEntitiesOutsideViewportCommand.NotifyCanExecuteChanged();
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
         GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
+        ExportMpolCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }
@@ -1492,5 +1520,19 @@ public class EditUnitNumberRequestedEventArgs : EventArgs
         Entity = entity;
         CurrentValue = currentValue;
         NewValue = currentValue;
+    }
+}
+
+public class ExportMpolRequestedEventArgs : EventArgs
+{
+    public string StoreName { get; set; }
+    public string? FilePath { get; set; }
+    public bool Cancelled { get; set; } = true;
+
+    public ExportMpolRequestedEventArgs(string? currentFilePath)
+    {
+        StoreName = currentFilePath != null
+            ? System.IO.Path.GetFileNameWithoutExtension(currentFilePath)
+            : "Store";
     }
 }

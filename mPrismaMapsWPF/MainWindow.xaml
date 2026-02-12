@@ -93,6 +93,7 @@
     <Window.InputBindings>
         <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
         <KeyBinding Key="S" Modifiers="Ctrl" Command="{Binding SaveFileCommand}"/>
+        <KeyBinding Key="E" Modifiers="Ctrl" Command="{Binding ExportMpolCommand}"/>
         <KeyBinding Key="Z" Modifiers="Ctrl" Command="{Binding UndoCommand}"/>
         <KeyBinding Key="Y" Modifiers="Ctrl" Command="{Binding RedoCommand}"/>
         <KeyBinding Key="Z" Modifiers="Ctrl+Shift" Command="{Binding RedoCommand}"/>
@@ -146,6 +147,7 @@
                 <MenuItem Header="_Open..." Command="{Binding OpenFileCommand}" InputGestureText="Ctrl+O"/>
                 <MenuItem Header="_Save" Command="{Binding SaveFileCommand}" InputGestureText="Ctrl+S"/>
                 <MenuItem Header="Save _As..." Command="{Binding SaveFileAsCommand}"/>
+                <MenuItem Header="Export _MPOL..." Command="{Binding ExportMpolCommand}" InputGestureText="Ctrl+E"/>
                 <Separator/>
                 <MenuItem Header="_Close" Command="{Binding CloseFileCommand}"/>
                 <Separator/>
@@ -241,6 +243,11 @@
                         Command="{Binding SaveFileCommand}"
                         ToolTip="Save File (Ctrl+S)">
                     <TextBlock Text="&#x1F4BE;" FontSize="16"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding ExportMpolCommand}"
+                        ToolTip="Export MPOL (Ctrl+E)">
+                    <TextBlock Text="&#x2B95;" FontSize="16"/>
                 </Button>
                 <Separator Margin="8,4"/>
                 <Button Style="{StaticResource ToolbarButtonStyle}"

@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(xxd:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(findstr:*)"
     ]
   }
 }

@@ -183,6 +183,41 @@ public class WalkwayGraph
     }
 
     /// <summary>
+    /// Finds the path coordinates from a point to the nearest entrance.
+    /// Returns the coordinate list and total distance, or null if no path found.
+    /// </summary>
+    public (List<(double x, double y)> path, double distance)? FindPathCoordinatesToEntrance(
+        double unitX, double unitY, double maxDistance)
+    {
+        var nearestNode = FindNearestNode(unitX, unitY, maxDistance);
+        if (nearestNode == null)
+            return null;
+
+        var handlePath = FindPathToNearestEntrance(nearestNode.Handle);
+        if (handlePath == null)
+            return null;
+
+        var coordinates = new List<(double x, double y)>();
+        double totalDistance = 0;
+
+        for (int i = 0; i < handlePath.Count; i++)
+        {
+            var node = Nodes[handlePath[i]];
+            coordinates.Add((node.X, node.Y));
+
+            if (i > 0)
+            {
+                var prev = Nodes[handlePath[i - 1]];
+                double dx = node.X - prev.X;
+                double dy = node.Y - prev.Y;
+                totalDistance += Math.Sqrt(dx * dx + dy * dy);
+            }
+        }
+
+        return (coordinates, totalDistance);
+    }
+
+    /// <summary>
     /// Given a path of node handles, returns the edge handles connecting them.
     /// </summary>
     public List<ulong> GetEdgeHandlesForPath(List<ulong> nodeHandles)
