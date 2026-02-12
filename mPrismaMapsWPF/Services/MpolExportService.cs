@@ -14,7 +14,8 @@ public class MpolExportService
         _walkwayService = walkwayService;
     }
 
-    public MpolMap Export(CadDocumentModel document, string storeName, HashSet<string> hiddenLayers)
+    public MpolMap Export(CadDocumentModel document, string storeName, HashSet<string> hiddenLayers,
+        bool flipX = false, bool flipY = false, double viewRotation = 0)
     {
         var entities = document.ModelSpaceEntities.ToList();
 
@@ -39,6 +40,22 @@ public class MpolExportService
             .Where(p => !hiddenLayers.Contains(p.Layer!.Name))
             .ToList();
 
+        // Precompute view transform (rotation + flips applied to raw CAD coords)
+        double rotRad = viewRotation * Math.PI / 180.0;
+        double cosR = Math.Cos(rotRad);
+        double sinR = Math.Sin(rotRad);
+
+        (double x, double y) ApplyViewTransform(double x, double y)
+        {
+            // Apply rotation first
+            double rx = x * cosR - y * sinR;
+            double ry = x * sinR + y * cosR;
+            // Then flips
+            if (flipX) rx = -rx;
+            if (flipY) ry = -ry;
+            return (rx, ry);
+        }
+
         // Compute search radius for walkway path finding
         double maxNodeDistance = ComputeMaxNodeDistance();
 
@@ -56,7 +73,8 @@ public class MpolExportService
             if (enclosingArea == null)
                 continue;
 
-            var vertices = ExtractVertices(enclosingArea);
+            var vertices = ExtractVertices(enclosingArea)
+                .Select(v => ApplyViewTransform(v.x, v.y)).ToList();
             var polygons = new List<List<(double x, double y)>> { vertices };
 
             // Find path to entrance
@@ -65,16 +83,18 @@ public class MpolExportService
             var pathResult = _walkwayService.Graph.FindPathCoordinatesToEntrance(px, py, maxNodeDistance);
             if (pathResult != null)
             {
-                pathCoords = pathResult.Value.path;
+                pathCoords = pathResult.Value.path
+                    .Select(p => ApplyViewTransform(p.x, p.y)).ToList();
                 pathDistance = pathResult.Value.distance;
             }
 
             rawUnits.Add((mtext.Value, polygons, pathCoords, pathDistance));
         }
 
-        // Collect all raw background contour vertices
+        // Collect all raw background contour vertices (with view transform applied)
         var rawBackgrounds = backgroundContours
-            .Select(ExtractVertices)
+            .Select(c => ExtractVertices(c)
+                .Select(v => ApplyViewTransform(v.x, v.y)).ToList())
             .ToList();
 
         // Compute bounding box of all geometry

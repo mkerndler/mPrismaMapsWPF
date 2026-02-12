@@ -578,7 +578,8 @@ public partial class MainWindowViewModel : ObservableObject
             .ToHashSet();
 
         var exportService = new Services.MpolExportService(_walkwayService);
-        var map = exportService.Export(_documentService.CurrentDocument, args.StoreName, hiddenLayers);
+        var map = exportService.Export(_documentService.CurrentDocument, args.StoreName, hiddenLayers,
+            FlipX, FlipY, ViewRotation);
 
         Services.MpolExportService.SerializeToFile(map, args.FilePath!);
 
