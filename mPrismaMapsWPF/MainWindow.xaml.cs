@@ -15,15 +15,17 @@ public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
     private readonly ISelectionService _selectionService;
+    private readonly IBackupService _backupService;
     private bool _isUpdatingLayerSelection;
     private bool _isUpdatingEntitySelection;
 
-    public MainWindow(MainWindowViewModel viewModel, ISelectionService selectionService)
+    public MainWindow(MainWindowViewModel viewModel, ISelectionService selectionService, IBackupService backupService)
     {
         InitializeComponent();
 
         _viewModel = viewModel;
         _selectionService = selectionService;
+        _backupService = backupService;
         DataContext = _viewModel;
 
         _viewModel.ZoomToFitRequested += OnZoomToFitRequested;
@@ -56,6 +58,8 @@ public partial class MainWindow : Window
 
         _viewModel.EditUnitNumberRequested += OnEditUnitNumberRequested;
         _viewModel.ExportMpolRequested += OnExportMpolRequested;
+        _viewModel.DeployMpolRequested += OnDeployMpolRequested;
+        _viewModel.RestoreBackupRequested += OnRestoreBackupRequested;
 
         // Set up drawing mode binding
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
@@ -656,6 +660,50 @@ public partial class MainWindow : Window
         if (saveDialog.ShowDialog() == true)
         {
             e.FilePath = saveDialog.FileName;
+            e.Cancelled = false;
+        }
+    }
+
+    private void OnDeployMpolRequested(object? sender, DeployMpolRequestedEventArgs e)
+    {
+        var dialog = new DeployMpolDialog(e.StoreName)
+        {
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            e.StoreName = dialog.StoreName;
+            e.StoreId = dialog.StoreId;
+            e.Floor = dialog.Floor;
+            e.Server = dialog.Server;
+            e.Username = dialog.Username;
+            e.Password = dialog.Password;
+            e.Cancelled = false;
+        }
+    }
+
+    private async void OnRestoreBackupRequested(object? sender, RestoreBackupRequestedEventArgs e)
+    {
+        var backups = await _backupService.ListBackupsAsync();
+
+        if (backups.Count == 0)
+        {
+            MessageBox.Show("No backups found.", "Restore Backup", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dialog = new RestoreBackupDialog(backups)
+        {
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            e.SelectedBackup = dialog.SelectedBackup;
+            e.Server = dialog.Server;
+            e.Username = dialog.Username;
+            e.Password = dialog.Password;
             e.Cancelled = false;
         }
     }

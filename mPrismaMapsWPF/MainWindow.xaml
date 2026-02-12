@@ -94,6 +94,7 @@
         <KeyBinding Key="O" Modifiers="Ctrl" Command="{Binding OpenFileCommand}"/>
         <KeyBinding Key="S" Modifiers="Ctrl" Command="{Binding SaveFileCommand}"/>
         <KeyBinding Key="E" Modifiers="Ctrl" Command="{Binding ExportMpolCommand}"/>
+        <KeyBinding Key="D" Modifiers="Ctrl" Command="{Binding DeployMpolCommand}"/>
         <KeyBinding Key="Z" Modifiers="Ctrl" Command="{Binding UndoCommand}"/>
         <KeyBinding Key="Y" Modifiers="Ctrl" Command="{Binding RedoCommand}"/>
         <KeyBinding Key="Z" Modifiers="Ctrl+Shift" Command="{Binding RedoCommand}"/>
@@ -148,6 +149,8 @@
                 <MenuItem Header="_Save" Command="{Binding SaveFileCommand}" InputGestureText="Ctrl+S"/>
                 <MenuItem Header="Save _As..." Command="{Binding SaveFileAsCommand}"/>
                 <MenuItem Header="Export _MPOL..." Command="{Binding ExportMpolCommand}" InputGestureText="Ctrl+E"/>
+                <MenuItem Header="_Deploy MPOL..." Command="{Binding DeployMpolCommand}" InputGestureText="Ctrl+D"/>
+                <MenuItem Header="_Restore Backup..." Command="{Binding RestoreBackupCommand}"/>
                 <Separator/>
                 <MenuItem Header="_Close" Command="{Binding CloseFileCommand}"/>
                 <Separator/>

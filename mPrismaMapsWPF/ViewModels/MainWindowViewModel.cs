@@ -22,6 +22,8 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly ISelectionService _selectionService;
     private readonly IUndoRedoService _undoRedoService;
     private readonly IWalkwayService _walkwayService;
+    private readonly IDeployService _deployService;
+    private readonly IBackupService _backupService;
     private readonly ILogger<MainWindowViewModel> _logger;
 
     public MainWindowViewModel(
@@ -29,12 +31,16 @@ public partial class MainWindowViewModel : ObservableObject
         ISelectionService selectionService,
         IUndoRedoService undoRedoService,
         IWalkwayService walkwayService,
+        IDeployService deployService,
+        IBackupService backupService,
         ILogger<MainWindowViewModel> logger)
     {
         _documentService = documentService;
         _selectionService = selectionService;
         _undoRedoService = undoRedoService;
         _walkwayService = walkwayService;
+        _deployService = deployService;
+        _backupService = backupService;
         _logger = logger;
 
         _documentService.DocumentLoaded += OnDocumentLoaded;
@@ -193,6 +199,8 @@ public partial class MainWindowViewModel : ObservableObject
     public event EventHandler<ZoomToAreaEventArgs>? ZoomToAreaRequested;
     public event EventHandler<EditUnitNumberRequestedEventArgs>? EditUnitNumberRequested;
     public event EventHandler<ExportMpolRequestedEventArgs>? ExportMpolRequested;
+    public event EventHandler<DeployMpolRequestedEventArgs>? DeployMpolRequested;
+    public event EventHandler<RestoreBackupRequestedEventArgs>? RestoreBackupRequested;
 
     [RelayCommand]
     private async Task OpenFileAsync()
@@ -587,6 +595,119 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     private bool CanExportMpol() => _documentService.CurrentDocument.Document != null;
+
+    [RelayCommand(CanExecute = nameof(CanDeployMpol))]
+    private async Task DeployMpolAsync()
+    {
+        var args = new DeployMpolRequestedEventArgs(
+            _documentService.CurrentDocument.FilePath);
+        DeployMpolRequested?.Invoke(this, args);
+
+        if (args.Cancelled)
+            return;
+
+        var hiddenLayers = LayerPanel.Layers
+            .Where(l => !l.IsVisible)
+            .Select(l => l.Name)
+            .ToHashSet();
+
+        var exportService = new Services.MpolExportService(_walkwayService);
+        var map = exportService.Export(_documentService.CurrentDocument, args.StoreName, hiddenLayers,
+            FlipX, FlipY, ViewRotation);
+        var json = Services.MpolExportService.SerializeToString(map);
+
+        var connectionString = BuildConnectionString(args.Server, args.Username, args.Password);
+
+        StatusText = "Deploying...";
+        IsLoading = true;
+
+        try
+        {
+            // Check if map exists and backup if so
+            bool exists = await _deployService.HasMapAsync(connectionString, args.StoreId, args.Floor);
+            if (exists)
+            {
+                var existingJson = await _deployService.GetMapAsync(connectionString, args.StoreId, args.Floor);
+                if (existingJson != null)
+                {
+                    await _backupService.SaveBackupAsync(args.StoreId, args.Floor, existingJson);
+                    _logger.LogInformation("Backed up existing map for {StoreId}/{Floor}", args.StoreId, args.Floor);
+                }
+            }
+
+            var (success, errorMessage) = await _deployService.DeployMapAsync(connectionString, args.StoreId, args.Floor, json);
+
+            if (success)
+            {
+                string action = exists ? "Updated" : "Deployed";
+                StatusText = $"Successfully {action.ToLower()} map for {args.StoreId}/{args.Floor}";
+            }
+            else
+            {
+                StatusText = "Deploy failed";
+                MessageBox.Show(errorMessage ?? "Unknown error", "Deploy Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Deploy failed for {StoreId}/{Floor}", args.StoreId, args.Floor);
+            StatusText = "Deploy failed";
+            MessageBox.Show($"Deploy failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private bool CanDeployMpol() => _documentService.CurrentDocument.Document != null;
+
+    [RelayCommand]
+    private async Task RestoreBackupAsync()
+    {
+        var args = new RestoreBackupRequestedEventArgs();
+        RestoreBackupRequested?.Invoke(this, args);
+
+        if (args.Cancelled || args.SelectedBackup == null)
+            return;
+
+        StatusText = "Restoring backup...";
+        IsLoading = true;
+
+        try
+        {
+            var json = await _backupService.ReadBackupAsync(args.SelectedBackup.FilePath);
+            var connectionString = BuildConnectionString(args.Server, args.Username, args.Password);
+
+            var (success, errorMessage) = await _deployService.DeployMapAsync(
+                connectionString, args.SelectedBackup.StoreId, args.SelectedBackup.Floor, json);
+
+            if (success)
+            {
+                StatusText = $"Successfully restored backup for {args.SelectedBackup.StoreId}/{args.SelectedBackup.Floor}";
+            }
+            else
+            {
+                StatusText = "Restore failed";
+                MessageBox.Show(errorMessage ?? "Unknown error", "Restore Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Restore failed");
+            StatusText = "Restore failed";
+            MessageBox.Show($"Restore failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private static string BuildConnectionString(string server, string username, string password)
+    {
+        return $"Data Source={server};User ID={username};Password={password};Encrypt=false;Initial Catalog=MPOL_Maps;";
+    }
 
     [RelayCommand(CanExecute = nameof(CanDeleteOutsideViewport))]
     private void DeleteEntitiesOutsideViewport()
@@ -1094,6 +1215,7 @@ public partial class MainWindowViewModel : ObservableObject
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
         GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
         ExportMpolCommand.NotifyCanExecuteChanged();
+        DeployMpolCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
         ZoomToFitRequested?.Invoke(this, EventArgs.Empty);
@@ -1116,6 +1238,7 @@ public partial class MainWindowViewModel : ObservableObject
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
         GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
         ExportMpolCommand.NotifyCanExecuteChanged();
+        DeployMpolCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }
@@ -1536,4 +1659,31 @@ public class ExportMpolRequestedEventArgs : EventArgs
             ? System.IO.Path.GetFileNameWithoutExtension(currentFilePath)
             : "Store";
     }
+}
+
+public class DeployMpolRequestedEventArgs : EventArgs
+{
+    public string StoreName { get; set; }
+    public string StoreId { get; set; } = "";
+    public string Floor { get; set; } = "";
+    public string Server { get; set; } = "";
+    public string Username { get; set; } = "";
+    public string Password { get; set; } = "";
+    public bool Cancelled { get; set; } = true;
+
+    public DeployMpolRequestedEventArgs(string? currentFilePath)
+    {
+        StoreName = currentFilePath != null
+            ? System.IO.Path.GetFileNameWithoutExtension(currentFilePath)
+            : "Store";
+    }
+}
+
+public class RestoreBackupRequestedEventArgs : EventArgs
+{
+    public Services.BackupInfo? SelectedBackup { get; set; }
+    public string Server { get; set; } = "";
+    public string Username { get; set; } = "";
+    public string Password { get; set; } = "";
+    public bool Cancelled { get; set; } = true;
 }

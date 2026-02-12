@@ -1,0 +1,80 @@
+<Window x:Class="mPrismaMapsWPF.Views.DeployMpolDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Deploy MPOL"
+        Height="450" Width="380"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#FF1E1E1E">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Store Name:" Foreground="#FFCCCCCC" Margin="0,0,0,4"/>
+        <TextBox Grid.Row="1" x:Name="StoreNameTextBox"
+                 Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                 Padding="4" Margin="0,0,0,8"/>
+
+        <TextBlock Grid.Row="2" Text="Store ID:" Foreground="#FFCCCCCC" Margin="0,0,0,4"/>
+        <TextBox Grid.Row="3" x:Name="StoreIdTextBox"
+                 Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                 Padding="4" Margin="0,0,0,8"/>
+
+        <TextBlock Grid.Row="4" Text="Floor:" Foreground="#FFCCCCCC" Margin="0,0,0,4"/>
+        <TextBox Grid.Row="5" x:Name="FloorTextBox"
+                 Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                 Padding="4" Margin="0,0,0,8"/>
+
+        <TextBlock Grid.Row="6" Text="Database Server:" Foreground="#FFCCCCCC" Margin="0,0,0,4"/>
+        <ComboBox Grid.Row="7" x:Name="ServerComboBox"
+                  Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                  Margin="0,0,0,8">
+            <ComboBoxItem Content="MPT-SQL\RPSQL"/>
+            <ComboBoxItem Content="MP-TESTBOXSQL\RPSQL"/>
+            <ComboBoxItem Content="SQL-RP-MP\RPSQL"/>
+        </ComboBox>
+
+        <TextBlock Grid.Row="8" Text="Username:" Foreground="#FFCCCCCC" Margin="0,0,0,4"/>
+        <TextBox Grid.Row="9" x:Name="UsernameTextBox"
+                 Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                 Padding="4" Margin="0,0,0,8"/>
+
+        <TextBlock Grid.Row="10" Text="Password:" Foreground="#FFCCCCCC" Margin="0,0,0,4"/>
+        <PasswordBox Grid.Row="11" x:Name="PasswordBox"
+                     Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                     Padding="4" Margin="0,0,0,8"/>
+
+        <StackPanel Grid.Row="13"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Deploy"
+                    Width="80" Height="28"
+                    Margin="0,0,8,0"
+                    Background="#FF0078D4"
+                    Foreground="White"
+                    BorderThickness="0"
+                    Click="DeployButton_Click"/>
+            <Button Content="Cancel"
+                    Width="80" Height="28"
+                    Background="#FF3C3C3C"
+                    Foreground="White"
+                    BorderBrush="#FF555555"
+                    Click="CancelButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

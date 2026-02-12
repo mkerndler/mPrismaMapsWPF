@@ -1,0 +1,77 @@
+<Window x:Class="mPrismaMapsWPF.Views.RestoreBackupDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Restore Backup"
+        Height="600" Width="500"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#FF1E1E1E">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Available Backups:" Foreground="#FFCCCCCC" Margin="0,0,0,8"/>
+
+        <ListBox Grid.Row="1" x:Name="BackupsListBox"
+                 Background="#FF2D2D2D" Foreground="White" BorderBrush="#FF555555"
+                 Margin="0,0,0,12">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="4,2">
+                        <TextBlock Text="{Binding DisplayName}" Foreground="White" FontWeight="SemiBold"/>
+                        <TextBlock Foreground="#FF888888" FontSize="11">
+                            <Run Text="{Binding FileSizeDisplay, Mode=OneWay}"/>
+                        </TextBlock>
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <TextBlock Grid.Row="2" Text="Database Server:" Foreground="#FFCCCCCC" Margin="0,0,0,4"/>
+        <ComboBox Grid.Row="3" x:Name="ServerComboBox"
+                  Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                  Margin="0,0,0,8">
+            <ComboBoxItem Content="MPT-SQL\RPSQL"/>
+            <ComboBoxItem Content="MP-TESTBOXSQL\RPSQL"/>
+            <ComboBoxItem Content="SQL-RP-MP\RPSQL"/>
+        </ComboBox>
+
+        <TextBlock Grid.Row="4" Text="Username:" Foreground="#FFCCCCCC" Margin="0,0,0,4"/>
+        <TextBox Grid.Row="5" x:Name="UsernameTextBox"
+                 Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                 Padding="4" Margin="0,0,0,8"/>
+
+        <TextBlock Grid.Row="6" Text="Password:" Foreground="#FFCCCCCC" Margin="0,0,0,4"/>
+        <PasswordBox Grid.Row="7" x:Name="PasswordBox"
+                     Background="#FF3C3C3C" Foreground="White" BorderBrush="#FF555555"
+                     Padding="4" Margin="0,0,0,12"/>
+
+        <StackPanel Grid.Row="8"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Content="Restore"
+                    Width="80" Height="28"
+                    Margin="0,0,8,0"
+                    Background="#FF0078D4"
+                    Foreground="White"
+                    BorderThickness="0"
+                    Click="RestoreButton_Click"/>
+            <Button Content="Cancel"
+                    Width="80" Height="28"
+                    Background="#FF3C3C3C"
+                    Foreground="White"
+                    BorderBrush="#FF555555"
+                    Click="CancelButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

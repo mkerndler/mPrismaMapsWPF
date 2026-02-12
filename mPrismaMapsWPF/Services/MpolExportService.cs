@@ -222,7 +222,7 @@ public class MpolExportService
         return map;
     }
 
-    public static void SerializeToFile(MpolMap map, string filePath)
+    public static string SerializeToString(MpolMap map)
     {
         var options = new JsonSerializerOptions
         {
@@ -230,7 +230,12 @@ public class MpolExportService
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
         };
 
-        string json = JsonSerializer.Serialize(map, options);
+        return JsonSerializer.Serialize(map, options);
+    }
+
+    public static void SerializeToFile(MpolMap map, string filePath)
+    {
+        string json = SerializeToString(map);
         File.WriteAllText(filePath, json);
     }
 

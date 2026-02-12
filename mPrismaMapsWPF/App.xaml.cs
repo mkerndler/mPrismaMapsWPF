@@ -46,6 +46,8 @@ public partial class App : Application
         services.AddSingleton<ISelectionService, SelectionService>();
         services.AddSingleton<IUndoRedoService, UndoRedoService>();
         services.AddSingleton<IWalkwayService, WalkwayService>();
+        services.AddSingleton<IDeployService, DeployService>();
+        services.AddSingleton<IBackupService, BackupService>();
 
         // ViewModels
         services.AddSingleton<MainWindowViewModel>();
