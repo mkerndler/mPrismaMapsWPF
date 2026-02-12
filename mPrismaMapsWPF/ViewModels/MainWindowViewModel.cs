@@ -54,6 +54,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
+        GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
     }
 
     public LayerPanelViewModel LayerPanel { get; }
@@ -537,6 +538,28 @@ public partial class MainWindowViewModel : ObservableObject
             .OfType<MText>()
             .Any(m => m.Layer?.Name == CadDocumentModel.UnitNumbersLayerName);
     }
+
+    [RelayCommand(CanExecute = nameof(CanGenerateBackgroundContours))]
+    private void GenerateBackgroundContours()
+    {
+        var hiddenLayers = LayerPanel.Layers
+            .Where(l => !l.IsVisible)
+            .Select(l => l.Name)
+            .ToHashSet();
+
+        var command = new GenerateBackgroundContoursCommand(_documentService.CurrentDocument, hiddenLayers);
+        _undoRedoService.Execute(command);
+
+        RefreshEntities();
+        LayerPanel.RefreshLayers();
+
+        if (command.FailedCount > 0)
+            StatusText = $"Generated {command.GeneratedCount} background contours ({command.FailedCount} failed)";
+        else
+            StatusText = $"Generated {command.GeneratedCount} background contours";
+    }
+
+    private bool CanGenerateBackgroundContours() => _documentService.CurrentDocument.Document != null;
 
     [RelayCommand(CanExecute = nameof(CanDeleteOutsideViewport))]
     private void DeleteEntitiesOutsideViewport()
@@ -1042,6 +1065,7 @@ public partial class MainWindowViewModel : ObservableObject
         DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
         DeleteEntitiesOutsideViewportCommand.NotifyCanExecuteChanged();
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
+        GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
         ZoomToFitRequested?.Invoke(this, EventArgs.Empty);
@@ -1062,6 +1086,7 @@ public partial class MainWindowViewModel : ObservableObject
         DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
         DeleteEntitiesOutsideViewportCommand.NotifyCanExecuteChanged();
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
+        GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }
@@ -1118,6 +1143,7 @@ public partial class MainWindowViewModel : ObservableObject
         EntityViewer.Refresh();
         _walkwayService.RebuildGraph(Entities);
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
+        GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }
 

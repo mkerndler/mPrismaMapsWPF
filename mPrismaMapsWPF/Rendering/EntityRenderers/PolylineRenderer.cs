@@ -30,7 +30,9 @@ public class PolylineRenderer : IEntityRenderer
             return;
 
         var pen = GetPen(polyline, renderContext);
-        bool shouldFill = polyline.IsClosed && polyline.Layer?.Name == CadDocumentModel.UnitAreasLayerName;
+        bool shouldFill = polyline.IsClosed &&
+            (polyline.Layer?.Name == CadDocumentModel.UnitAreasLayerName ||
+             polyline.Layer?.Name == CadDocumentModel.BackgroundContoursLayerName);
         var geometry = new StreamGeometry();
 
         using (var ctx = geometry.Open())

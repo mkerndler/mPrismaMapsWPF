@@ -122,6 +122,8 @@
         <KeyBinding Key="L" Modifiers="Ctrl" Command="{Binding LockSelectedCommand}"/>
         <!-- Generate Unit Areas -->
         <KeyBinding Key="U" Modifiers="Ctrl+Shift" Command="{Binding GenerateUnitAreasCommand}"/>
+        <!-- Generate Background Contours -->
+        <KeyBinding Key="B" Modifiers="Ctrl+Shift" Command="{Binding GenerateBackgroundContoursCommand}"/>
         <!-- View transform shortcuts -->
         <KeyBinding Key="D0" Modifiers="Ctrl" Command="{Binding CenterOnOriginCommand}"/>
         <KeyBinding Key="H" Modifiers="Ctrl" Command="{Binding ToggleFlipXCommand}"/>
@@ -220,6 +222,7 @@
                 <MenuItem Header="Draw _Fairway" Command="{Binding SetDrawFairwayModeCommand}" InputGestureText="F"/>
                 <Separator/>
                 <MenuItem Header="Generate _Unit Areas" Command="{Binding GenerateUnitAreasCommand}" InputGestureText="Ctrl+Shift+U" ToolTip="Generate filled polygons for each unit number"/>
+                <MenuItem Header="Generate _Background Contours" Command="{Binding GenerateBackgroundContoursCommand}" InputGestureText="Ctrl+Shift+B" ToolTip="Generate polygon outlines around background geometry"/>
                 <Separator/>
                 <MenuItem Header="_Delete Hidden Entities" Command="{Binding DeleteHiddenEntitiesCommand}" ToolTip="Delete all hidden/invisible entities"/>
                 <MenuItem Header="Delete Entities _Outside Viewport" Command="{Binding DeleteEntitiesOutsideViewportCommand}" ToolTip="Delete all entities outside the current view"/>
@@ -353,6 +356,11 @@
                         Command="{Binding GenerateUnitAreasCommand}"
                         ToolTip="Generate Unit Areas (Ctrl+Shift+U)">
                     <TextBlock Text="&#x25A7;" FontSize="16"/>
+                </Button>
+                <Button Style="{StaticResource ToolbarButtonStyle}"
+                        Command="{Binding GenerateBackgroundContoursCommand}"
+                        ToolTip="Generate Background Contours (Ctrl+Shift+B)">
+                    <TextBlock Text="&#x25A8;" FontSize="16"/>
                 </Button>
                 <Separator Margin="8,4"/>
                 <!-- Snap and Grid -->

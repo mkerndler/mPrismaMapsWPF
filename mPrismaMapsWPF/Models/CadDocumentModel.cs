@@ -23,6 +23,7 @@ public class CadDocumentModel
     public const string UnitNumbersLayerName = "Unit Numbers";
     public const string WalkwaysLayerName = "Walkways";
     public const string UnitAreasLayerName = "Unit Areas";
+    public const string BackgroundContoursLayerName = "Background Contours";
 
     /// <summary>
     /// Gets or creates the "User Drawings" layer for user-created entities.
@@ -110,6 +111,29 @@ public class CadDocumentModel
         var layer = new Layer(UnitAreasLayerName)
         {
             Color = new ACadSharp.Color(4) // Cyan
+        };
+
+        Document.Layers.Add(layer);
+        IsDirty = true;
+
+        return layer;
+    }
+
+    /// <summary>
+    /// Gets or creates the "Background Contours" layer for generated background outlines.
+    /// </summary>
+    public Layer? GetOrCreateBackgroundContoursLayer()
+    {
+        if (Document == null)
+            return null;
+
+        var existingLayer = Document.Layers.FirstOrDefault(l => l.Name == BackgroundContoursLayerName);
+        if (existingLayer != null)
+            return existingLayer;
+
+        var layer = new Layer(BackgroundContoursLayerName)
+        {
+            Color = new ACadSharp.Color(1) // Red
         };
 
         Document.Layers.Add(layer);

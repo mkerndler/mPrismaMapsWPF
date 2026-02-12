@@ -27,11 +27,12 @@ public class RenderService
 
     public void RenderEntities(DrawingContext context, IEnumerable<Entity> entities, RenderContext renderContext)
     {
-        // Two-pass rendering: Unit Areas first (underneath), then everything else
-        // Pass 1: Render Unit Areas layer entities
+        // Two-pass rendering: Unit Areas and Background Contours first (underneath), then everything else
+        // Pass 1: Render Unit Areas and Background Contours layer entities
         foreach (var entity in entities)
         {
-            if (entity.Layer?.Name != CadDocumentModel.UnitAreasLayerName)
+            if (entity.Layer?.Name != CadDocumentModel.UnitAreasLayerName &&
+                entity.Layer?.Name != CadDocumentModel.BackgroundContoursLayerName)
                 continue;
 
             if (!renderContext.IsLayerVisible(entity))
@@ -50,7 +51,8 @@ public class RenderService
         // Pass 2: Render all other entities
         foreach (var entity in entities)
         {
-            if (entity.Layer?.Name == CadDocumentModel.UnitAreasLayerName)
+            if (entity.Layer?.Name == CadDocumentModel.UnitAreasLayerName ||
+                entity.Layer?.Name == CadDocumentModel.BackgroundContoursLayerName)
                 continue;
 
             if (!renderContext.IsLayerVisible(entity))

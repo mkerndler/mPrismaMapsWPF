@@ -220,6 +220,61 @@ public class FloodFillGrid
         RasterizeArc(cx, cy, radius, startAngle, endAngle);
     }
 
+    public List<bool[,]> FindWallComponents(int minCellCount)
+    {
+        var visited = new int[_gridWidth, _gridHeight];
+        var components = new List<bool[,]>();
+        int componentId = 0;
+
+        for (int y = 0; y < _gridHeight; y++)
+        {
+            for (int x = 0; x < _gridWidth; x++)
+            {
+                if (!_walls[x, y] || visited[x, y] != 0)
+                    continue;
+
+                componentId++;
+                var cells = new List<(int x, int y)>();
+                var queue = new Queue<(int x, int y)>();
+                queue.Enqueue((x, y));
+                visited[x, y] = componentId;
+
+                while (queue.Count > 0)
+                {
+                    var (cx, cy) = queue.Dequeue();
+                    cells.Add((cx, cy));
+
+                    // 8-connected neighbors
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        for (int dy = -1; dy <= 1; dy++)
+                        {
+                            if (dx == 0 && dy == 0) continue;
+                            int nx = cx + dx;
+                            int ny = cy + dy;
+                            if (nx >= 0 && nx < _gridWidth && ny >= 0 && ny < _gridHeight &&
+                                _walls[nx, ny] && visited[nx, ny] == 0)
+                            {
+                                visited[nx, ny] = componentId;
+                                queue.Enqueue((nx, ny));
+                            }
+                        }
+                    }
+                }
+
+                if (cells.Count < minCellCount)
+                    continue;
+
+                var mask = new bool[_gridWidth, _gridHeight];
+                foreach (var (cx, cy) in cells)
+                    mask[cx, cy] = true;
+                components.Add(mask);
+            }
+        }
+
+        return components;
+    }
+
     public bool[,]? FloodFill(double cadX, double cadY)
     {
         int seedX = CadToGridX(cadX);
