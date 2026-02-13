@@ -20,6 +20,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Resource Include="Fonts\materialdesignicons-webfont.ttf" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="ACadSharp" Version="3.3.23" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />

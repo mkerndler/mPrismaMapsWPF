@@ -184,6 +184,35 @@ public partial class LayerPanelViewModel : ObservableObject
         LayerLockChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    [RelayCommand(CanExecute = nameof(CanDeleteEmptyLayers))]
+    private void DeleteEmptyLayers()
+    {
+        var emptyLayers = Layers
+            .Where(l => l.Name != "0")
+            .Where(l => !_documentService.CurrentDocument.ModelSpaceEntities
+                .Any(e => e.Layer?.Name == l.Name))
+            .ToList();
+
+        if (emptyLayers.Count == 0) return;
+
+        foreach (var layerModel in emptyLayers)
+        {
+            var command = new DeleteLayerCommand(
+                _documentService.CurrentDocument, layerModel.Layer,
+                LayerDeleteOption.DeleteEntities, null);
+            _undoRedoService.Execute(command);
+            Layers.Remove(layerModel);
+            SelectedLayers.Remove(layerModel);
+        }
+        SelectedLayer = Layers.FirstOrDefault();
+        UpdateSelectedLayerCount();
+        LayersChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private bool CanDeleteEmptyLayers() => _documentService.CurrentDocument.Document != null &&
+        Layers.Any(l => l.Name != "0" && !_documentService.CurrentDocument.ModelSpaceEntities
+            .Any(e => e.Layer?.Name == l.Name));
+
     [RelayCommand(CanExecute = nameof(CanDeleteSelectedLayers))]
     private void DeleteSelectedLayers()
     {
@@ -343,6 +372,7 @@ public partial class LayerPanelViewModel : ObservableObject
     {
         DeleteSelectedLayersCommand.NotifyCanExecuteChanged();
         DeleteSelectedLayerCommand.NotifyCanExecuteChanged();
+        DeleteEmptyLayersCommand.NotifyCanExecuteChanged();
         ToggleSelectedLayersVisibilityCommand.NotifyCanExecuteChanged();
         ShowSelectedLayersCommand.NotifyCanExecuteChanged();
         HideSelectedLayersCommand.NotifyCanExecuteChanged();

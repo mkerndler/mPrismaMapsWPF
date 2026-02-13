@@ -159,12 +159,12 @@
             <MenuItem Header="_Edit">
                 <MenuItem Header="_Undo" Command="{Binding UndoCommand}" InputGestureText="Ctrl+Z">
                     <MenuItem.Icon>
-                        <TextBlock Text="&#x21B6;" FontSize="12"/>
+                        <TextBlock Text="&#xF054C;" FontFamily="{StaticResource MaterialIcons}" FontSize="12"/>
                     </MenuItem.Icon>
                 </MenuItem>
                 <MenuItem Header="_Redo" Command="{Binding RedoCommand}" InputGestureText="Ctrl+Y">
                     <MenuItem.Icon>
-                        <TextBlock Text="&#x21B7;" FontSize="12"/>
+                        <TextBlock Text="&#xF044E;" FontFamily="{StaticResource MaterialIcons}" FontSize="12"/>
                     </MenuItem.Icon>
                 </MenuItem>
                 <Separator/>
@@ -176,7 +176,7 @@
                 <Separator/>
                 <MenuItem Header="_Delete Selected" Command="{Binding DeleteSelectedCommand}" InputGestureText="Del">
                     <MenuItem.Icon>
-                        <TextBlock Text="&#x2716;" FontSize="12"/>
+                        <TextBlock Text="&#xF01B4;" FontFamily="{StaticResource MaterialIcons}" FontSize="12"/>
                     </MenuItem.Icon>
                 </MenuItem>
                 <MenuItem Header="Delete by _Type" x:Name="DeleteByTypeMenu">
@@ -185,12 +185,12 @@
                 <Separator/>
                 <MenuItem Header="_Lock Selected" Command="{Binding LockSelectedCommand}" InputGestureText="Ctrl+L">
                     <MenuItem.Icon>
-                        <TextBlock Text="&#x1F512;" FontSize="12"/>
+                        <TextBlock Text="&#xF033E;" FontFamily="{StaticResource MaterialIcons}" FontSize="12"/>
                     </MenuItem.Icon>
                 </MenuItem>
                 <MenuItem Header="_Unlock All Entities" Command="{Binding UnlockAllEntitiesCommand}">
                     <MenuItem.Icon>
-                        <TextBlock Text="&#x1F513;" FontSize="12"/>
+                        <TextBlock Text="&#xF0FC6;" FontFamily="{StaticResource MaterialIcons}" FontSize="12"/>
                     </MenuItem.Icon>
                 </MenuItem>
             </MenuItem>
@@ -231,6 +231,7 @@
                 <Separator/>
                 <MenuItem Header="_Delete Hidden Entities" Command="{Binding DeleteHiddenEntitiesCommand}" ToolTip="Delete all hidden/invisible entities"/>
                 <MenuItem Header="Delete Entities _Outside Viewport" Command="{Binding DeleteEntitiesOutsideViewportCommand}" ToolTip="Delete all entities outside the current view"/>
+                <MenuItem Header="Delete _Empty Layers" Command="{Binding LayerPanel.DeleteEmptyLayersCommand}" ToolTip="Delete all layers with no entities"/>
             </MenuItem>
         </Menu>
 
@@ -240,62 +241,62 @@
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding OpenFileCommand}"
                         ToolTip="Open File (Ctrl+O)">
-                    <TextBlock Text="&#x1F4C2;" FontSize="16"/>
+                    <TextBlock Text="&#xF0770;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding SaveFileCommand}"
                         ToolTip="Save File (Ctrl+S)">
-                    <TextBlock Text="&#x1F4BE;" FontSize="16"/>
+                    <TextBlock Text="&#xF0193;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding ExportMpolCommand}"
                         ToolTip="Export MPOL (Ctrl+E)">
-                    <TextBlock Text="&#x2B95;" FontSize="16"/>
+                    <TextBlock Text="&#xF0207;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Separator Margin="8,4"/>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding UndoCommand}"
                         ToolTip="{Binding UndoDescription, StringFormat='Undo: {0} (Ctrl+Z)', FallbackValue='Undo (Ctrl+Z)'}">
-                    <TextBlock Text="&#x21B6;" FontSize="16"/>
+                    <TextBlock Text="&#xF054C;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding RedoCommand}"
                         ToolTip="{Binding RedoDescription, StringFormat='Redo: {0} (Ctrl+Y)', FallbackValue='Redo (Ctrl+Y)'}">
-                    <TextBlock Text="&#x21B7;" FontSize="16"/>
+                    <TextBlock Text="&#xF044E;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Separator Margin="8,4"/>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding ZoomInCommand}"
                         ToolTip="Zoom In (+)">
-                    <TextBlock Text="+" FontSize="18" FontWeight="Bold"/>
+                    <TextBlock Text="&#xF034B;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding ZoomOutCommand}"
                         ToolTip="Zoom Out (-)">
-                    <TextBlock Text="-" FontSize="18" FontWeight="Bold"/>
+                    <TextBlock Text="&#xF034A;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding ZoomToFitCommand}"
                         ToolTip="Zoom to Fit (Home)">
-                    <TextBlock Text="&#x26F6;" FontSize="16"/>
+                    <TextBlock Text="&#xF18F5;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding SetZoomToAreaModeCommand}"
                         ToolTip="Zoom to Area (Z)">
-                    <TextBlock Text="&#x2610;" FontSize="16"/>
+                    <TextBlock Text="&#xF0EF6;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Separator Margin="8,4"/>
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
                               IsChecked="{Binding IsSelectMode}"
                               Command="{Binding SetSelectModeCommand}"
                               ToolTip="Select Mode (S)">
-                    <TextBlock Text="&#x2B9C;" FontSize="16"/>
+                    <TextBlock Text="&#xF01C0;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
                               IsChecked="{Binding IsPanMode}"
                               Command="{Binding SetPanModeCommand}"
                               ToolTip="Pan Mode (P)">
-                    <TextBlock Text="&#x270B;" FontSize="16"/>
+                    <TextBlock Text="&#xF0BB4;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <Separator Margin="8,4"/>
                 <!-- Drawing Tools -->
@@ -303,19 +304,19 @@
                               IsChecked="{Binding IsDrawLineMode, Mode=OneWay}"
                               Command="{Binding SetDrawLineModeCommand}"
                               ToolTip="Draw Line (L)">
-                    <TextBlock Text="/" FontSize="18" FontWeight="Bold"/>
+                    <TextBlock Text="&#xF055E;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
                               IsChecked="{Binding IsDrawPolylineMode, Mode=OneWay}"
                               Command="{Binding SetDrawPolylineModeCommand}"
                               ToolTip="Draw Polyline (Shift+P)">
-                    <TextBlock Text="&#x2571;&#x2572;" FontSize="12"/>
+                    <TextBlock Text="&#xF0561;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
                               IsChecked="{Binding IsDrawPolygonMode, Mode=OneWay}"
                               Command="{Binding SetDrawPolygonModeCommand}"
                               ToolTip="Draw Polygon (G)">
-                    <TextBlock Text="&#x2B21;" FontSize="16"/>
+                    <TextBlock Text="&#xF0560;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <Separator Margin="8,4"/>
                 <!-- Unit Number Tool -->
@@ -323,7 +324,7 @@
                               IsChecked="{Binding IsPlaceUnitNumberMode, Mode=OneWay}"
                               Command="{Binding SetPlaceUnitNumberModeCommand}"
                               ToolTip="Place Unit Number (N)">
-                    <TextBlock Text="#" FontSize="16" FontWeight="Bold"/>
+                    <TextBlock Text="&#xF03A0;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <TextBlock Text="Pfx:" Foreground="#FF888888" VerticalAlignment="Center" Margin="4,0,2,0" FontSize="10"/>
                 <TextBox Text="{Binding UnitNumberPrefix, UpdateSourceTrigger=PropertyChanged}"
@@ -352,7 +353,7 @@
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
                               IsChecked="{Binding UnitAutoIncrement}"
                               ToolTip="Auto-increment unit number">
-                    <TextBlock Text="A+" FontSize="10" FontWeight="Bold"/>
+                    <TextBlock Text="1+" FontSize="10" FontWeight="Bold"/>
                 </ToggleButton>
                 <Separator Margin="8,4"/>
                 <!-- Fairway Tool -->
@@ -360,17 +361,17 @@
                               IsChecked="{Binding IsDrawFairwayMode, Mode=OneWay}"
                               Command="{Binding SetDrawFairwayModeCommand}"
                               ToolTip="Draw Fairway (F)">
-                    <TextBlock Text="&#x2442;" FontSize="16"/>
+                    <TextBlock Text="&#xF0583;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding GenerateUnitAreasCommand}"
                         ToolTip="Generate Unit Areas (Ctrl+Shift+U)">
-                    <TextBlock Text="&#x25A7;" FontSize="16"/>
+                    <TextBlock Text="&#xF0FE6;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding GenerateBackgroundContoursCommand}"
                         ToolTip="Generate Background Contours (Ctrl+Shift+B)">
-                    <TextBlock Text="&#x25A8;" FontSize="16"/>
+                    <TextBlock Text="&#xF0B76;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Separator Margin="8,4"/>
                 <!-- Snap and Grid -->
@@ -378,13 +379,13 @@
                               IsChecked="{Binding IsSnapEnabled, Mode=OneWay}"
                               Command="{Binding ToggleSnapCommand}"
                               ToolTip="Toggle Snap (F9)">
-                    <TextBlock Text="&#x229E;" FontSize="16"/>
+                    <TextBlock Text="&#xF0758;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
                               IsChecked="{Binding IsGridVisible, Mode=OneWay}"
                               Command="{Binding ToggleGridCommand}"
                               ToolTip="Toggle Grid (F7)">
-                    <TextBlock Text="&#x25A6;" FontSize="16"/>
+                    <TextBlock Text="&#xF02C1;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <TextBlock Text="Grid:" Foreground="White" VerticalAlignment="Center" Margin="8,0,4,0"/>
                 <TextBox Text="{Binding GridSpacing, UpdateSourceTrigger=PropertyChanged}"
@@ -399,28 +400,28 @@
                               IsChecked="{Binding FlipX, Mode=OneWay}"
                               Command="{Binding ToggleFlipXCommand}"
                               ToolTip="Flip Horizontal (Ctrl+H)">
-                    <TextBlock Text="&#x2194;" FontSize="16"/>
+                    <TextBlock Text="&#xF10E7;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
                               IsChecked="{Binding FlipY, Mode=OneWay}"
                               Command="{Binding ToggleFlipYCommand}"
                               ToolTip="Flip Vertical (Ctrl+J)">
-                    <TextBlock Text="&#x2195;" FontSize="16"/>
+                    <TextBlock Text="&#xF10E8;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding ShowRotateViewDialogCommand}"
                         ToolTip="Rotate View (Ctrl+R)">
-                    <TextBlock Text="&#x21BB;" FontSize="16"/>
+                    <TextBlock Text="&#xF0464;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding CenterOnOriginCommand}"
                         ToolTip="Center on Origin (Ctrl+0)">
-                    <TextBlock Text="&#x2316;" FontSize="16"/>
+                    <TextBlock Text="&#xF0044;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding ResetViewTransformsCommand}"
                         ToolTip="Reset View Transforms">
-                    <TextBlock Text="&#x21BA;" FontSize="16"/>
+                    <TextBlock Text="&#xF0156;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </Button>
             </ToolBar>
         </ToolBarTray>
@@ -824,7 +825,7 @@
                                                   VerticalAlignment="Center"
                                                   Margin="0,0,4,0"
                                                   ToolTip="Visible"/>
-                                        <TextBlock Text="&#x1F512;" FontSize="10"
+                                        <TextBlock Text="&#xF033E;" FontFamily="{StaticResource MaterialIcons}" FontSize="10"
                                                    VerticalAlignment="Center"
                                                    Margin="0,0,4,0"
                                                    Cursor="Hand"

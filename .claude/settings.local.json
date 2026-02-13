@@ -3,7 +3,8 @@
     "allow": [
       "Bash(xxd:*)",
       "Bash(ls:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(curl:*)"
     ]
   }
 }
