@@ -4,7 +4,9 @@
       "Bash(xxd:*)",
       "Bash(ls:*)",
       "Bash(findstr:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(dotnet restore:*)",
+      "Bash(dotnet test:*)"
     ]
   }
 }
