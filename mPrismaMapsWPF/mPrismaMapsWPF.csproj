@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <ApplicationIcon></ApplicationIcon>
+    <ApplicationIcon>Icon\mprismamaps.ico</ApplicationIcon>
 
     <!-- Performance optimizations -->
     <!-- ReadyToRun: Pre-compile IL to native code for faster startup -->
@@ -17,10 +17,22 @@
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
     <!-- Tiered compilation for better steady-state performance -->
     <TieredCompilation>true</TieredCompilation>
+    <PackageIcon>mprismamaps.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="Icon\mprismamaps.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Resource Include="Fonts\materialdesignicons-webfont.ttf" />
+    <Resource Include="Icon\mprismamaps.ico">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Icon\mprismamaps.png">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </Resource>
   </ItemGroup>
 
   <ItemGroup>
@@ -30,6 +42,13 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Icon\mprismamaps.png">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
   </ItemGroup>
 
 </Project>
