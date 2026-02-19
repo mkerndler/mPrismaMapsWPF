@@ -157,8 +157,11 @@ public class FairwayTool : IDrawingTool
         // Don't fire Cancelled - just end the current chain so the next click starts fresh
     }
 
-    private static bool IsShiftHeld() =>
-        Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
+    private static bool IsShiftHeld()
+    {
+        try { return Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift); }
+        catch (InvalidOperationException) { return false; }
+    }
 
     private (ulong handle, double x, double y)? FindSnapNode(Point cadPoint)
     {

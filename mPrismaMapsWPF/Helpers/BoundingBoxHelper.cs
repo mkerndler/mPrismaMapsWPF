@@ -143,11 +143,14 @@ public static class BoundingBoxHelper
     private static Rect GetMTextBounds(MText mtext)
     {
         string cleanText = string.IsNullOrEmpty(mtext.Value) ? "" : StripMTextFormatting(mtext.Value);
+        // Use a minimum effective height so zero-height text (e.g. legacy imports) still
+        // produces a non-degenerate bounding box for spatial grid coverage.
+        double effectiveHeight = mtext.Height > 0 ? mtext.Height : 1.0;
         double width = mtext.RectangleWidth > 0
             ? mtext.RectangleWidth
-            : Math.Max(cleanText.Length * mtext.Height * 0.6, mtext.Height);
+            : Math.Max(cleanText.Length * effectiveHeight * 0.6, effectiveHeight);
         int lineCount = cleanText.Count(c => c == '\n') + 1;
-        double height = mtext.Height * lineCount;
+        double height = effectiveHeight * lineCount;
 
         // Text renders upward from insert point
         return new Rect(

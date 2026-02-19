@@ -25,6 +25,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IDeployService _deployService;
     private readonly IBackupService _backupService;
     private readonly ILogger<MainWindowViewModel> _logger;
+    private readonly LegacyMapImportExport _legacyImportExport = new();
 
     public MainWindowViewModel(
         IDocumentService documentService,
@@ -198,6 +199,7 @@ public partial class MainWindowViewModel : ObservableObject
     public event EventHandler<ZoomToEntityEventArgs>? ZoomToEntityRequested;
     public event EventHandler<ZoomToAreaEventArgs>? ZoomToAreaRequested;
     public event EventHandler<EditUnitNumberRequestedEventArgs>? EditUnitNumberRequested;
+    public event EventHandler<ScaleMapRequestedEventArgs>? ScaleMapRequested;
     public event EventHandler<ExportMpolRequestedEventArgs>? ExportMpolRequested;
     public event EventHandler<DeployMpolRequestedEventArgs>? DeployMpolRequested;
     public event EventHandler<RestoreBackupRequestedEventArgs>? RestoreBackupRequested;
@@ -304,6 +306,77 @@ public partial class MainWindowViewModel : ObservableObject
 
             IsLoading = false;
             StatusText = success ? "Saved" : "Save failed";
+        }
+    }
+
+    [RelayCommand]
+    private async Task OpenLegacyAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "Legacy Map Files (*.json)|*.json|All Files (*.*)|*.*",
+            FilterIndex = 1,
+            Title = "Open Legacy Map"
+        };
+
+        if (dialog.ShowDialog() != true)
+            return;
+
+        IsLoading = true;
+        StatusText = "Loading legacy map...";
+        try
+        {
+            string json = await File.ReadAllTextAsync(dialog.FileName);
+            var imported = await Task.Run(() => _legacyImportExport.Import(json));
+            _documentService.LoadImported(imported.Document!, dialog.FileName);
+            StatusText = "Legacy map loaded";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to open legacy map {FileName}", dialog.FileName);
+            MessageBox.Show($"Failed to open legacy map:\n{ex.Message}", "Open Legacy Error",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusText = "Open legacy failed";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSave))]
+    private async Task SaveLegacyAsync()
+    {
+        var dialog = new SaveFileDialog
+        {
+            Filter = "Legacy Map Files (*.json)|*.json|All Files (*.*)|*.*",
+            FilterIndex = 1,
+            Title = "Save Legacy Map"
+        };
+
+        if (dialog.ShowDialog() != true)
+            return;
+
+        IsLoading = true;
+        StatusText = "Saving legacy map...";
+        try
+        {
+            string storeName = Path.GetFileNameWithoutExtension(dialog.FileName);
+            string json = await Task.Run(
+                () => _legacyImportExport.Export(_documentService.CurrentDocument, storeName));
+            await File.WriteAllTextAsync(dialog.FileName, json);
+            StatusText = "Legacy map saved";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to save legacy map {FileName}", dialog.FileName);
+            MessageBox.Show($"Failed to save legacy map:\n{ex.Message}", "Save Legacy Error",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            StatusText = "Save legacy failed";
+        }
+        finally
+        {
+            IsLoading = false;
         }
     }
 
@@ -736,6 +809,23 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     private bool CanDeleteOutsideViewport() => _documentService.CurrentDocument.Document != null;
+
+    [RelayCommand(CanExecute = nameof(CanSave))]
+    private void ShowScaleMapDialog()
+    {
+        var args = new ScaleMapRequestedEventArgs();
+        ScaleMapRequested?.Invoke(this, args);
+
+        if (!args.Confirmed)
+            return;
+
+        var command = new ScaleMapCommand(_documentService.CurrentDocument, args.ScaleFactor);
+        _undoRedoService.Execute(command);
+
+        RefreshEntities();
+        LayerPanel.RefreshLayers();
+        StatusText = $"Map scaled by {args.ScaleFactor}x";
+    }
 
     private void UpdateModeFlags()
     {
@@ -1216,6 +1306,7 @@ public partial class MainWindowViewModel : ObservableObject
         GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
         ExportMpolCommand.NotifyCanExecuteChanged();
         DeployMpolCommand.NotifyCanExecuteChanged();
+        ShowScaleMapDialogCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
         ZoomToFitRequested?.Invoke(this, EventArgs.Empty);
@@ -1239,6 +1330,7 @@ public partial class MainWindowViewModel : ObservableObject
         GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
         ExportMpolCommand.NotifyCanExecuteChanged();
         DeployMpolCommand.NotifyCanExecuteChanged();
+        ShowScaleMapDialogCommand.NotifyCanExecuteChanged();
 
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }

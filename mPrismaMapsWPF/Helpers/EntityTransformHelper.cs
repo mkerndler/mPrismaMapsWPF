@@ -74,6 +74,80 @@ public static class EntityTransformHelper
         }
     }
 
+    public static void ScaleEntity(Entity entity, double factor)
+    {
+        switch (entity)
+        {
+            case Arc arc:
+                arc.Center = new XYZ(arc.Center.X * factor, arc.Center.Y * factor, arc.Center.Z * factor);
+                arc.Radius *= factor;
+                break;
+
+            case Circle circle:
+                circle.Center = new XYZ(circle.Center.X * factor, circle.Center.Y * factor, circle.Center.Z * factor);
+                circle.Radius *= factor;
+                break;
+
+            case Line line:
+                line.StartPoint = new XYZ(line.StartPoint.X * factor, line.StartPoint.Y * factor, line.StartPoint.Z * factor);
+                line.EndPoint = new XYZ(line.EndPoint.X * factor, line.EndPoint.Y * factor, line.EndPoint.Z * factor);
+                break;
+
+            case Ellipse ellipse:
+                ellipse.Center = new XYZ(ellipse.Center.X * factor, ellipse.Center.Y * factor, ellipse.Center.Z * factor);
+                ellipse.MajorAxisEndPoint = new XYZ(
+                    ellipse.MajorAxisEndPoint.X * factor,
+                    ellipse.MajorAxisEndPoint.Y * factor,
+                    ellipse.MajorAxisEndPoint.Z * factor);
+                break;
+
+            case LwPolyline lwPolyline:
+                for (int i = 0; i < lwPolyline.Vertices.Count; i++)
+                {
+                    var v = lwPolyline.Vertices[i];
+                    lwPolyline.Vertices[i] = new LwPolyline.Vertex(
+                        new XY(v.Location.X * factor, v.Location.Y * factor))
+                    {
+                        Bulge = v.Bulge,
+                        StartWidth = v.StartWidth * factor,
+                        EndWidth = v.EndWidth * factor
+                    };
+                }
+                break;
+
+            case Polyline2D polyline2D:
+                foreach (var vertex in polyline2D.Vertices)
+                {
+                    vertex.Location = new XYZ(
+                        vertex.Location.X * factor,
+                        vertex.Location.Y * factor,
+                        vertex.Location.Z * factor);
+                }
+                break;
+
+            case MText mtext:
+                mtext.InsertPoint = new XYZ(mtext.InsertPoint.X * factor, mtext.InsertPoint.Y * factor, mtext.InsertPoint.Z * factor);
+                mtext.Height *= factor;
+                break;
+
+            case TextEntity text:
+                text.InsertPoint = new XYZ(text.InsertPoint.X * factor, text.InsertPoint.Y * factor, text.InsertPoint.Z * factor);
+                text.Height *= factor;
+                break;
+
+            case Insert insert:
+                insert.InsertPoint = new XYZ(insert.InsertPoint.X * factor, insert.InsertPoint.Y * factor, insert.InsertPoint.Z * factor);
+                break;
+
+            case Point point:
+                point.Location = new XYZ(point.Location.X * factor, point.Location.Y * factor, point.Location.Z * factor);
+                break;
+
+            default:
+                break;
+        }
+    }
+
     public static Entity? CloneEntity(Entity entity)
     {
         switch (entity)

@@ -148,6 +148,10 @@
                 <MenuItem Header="_Open..." Command="{Binding OpenFileCommand}" InputGestureText="Ctrl+O"/>
                 <MenuItem Header="_Save" Command="{Binding SaveFileCommand}" InputGestureText="Ctrl+S"/>
                 <MenuItem Header="Save _As..." Command="{Binding SaveFileAsCommand}"/>
+                <Separator/>
+                <MenuItem Header="Open Le_gacy..." Command="{Binding OpenLegacyCommand}"/>
+                <MenuItem Header="Save _Legacy..." Command="{Binding SaveLegacyCommand}"/>
+                <Separator/>
                 <MenuItem Header="Export _MPOL..." Command="{Binding ExportMpolCommand}" InputGestureText="Ctrl+E"/>
                 <MenuItem Header="_Deploy MPOL..." Command="{Binding DeployMpolCommand}" InputGestureText="Ctrl+D"/>
                 <MenuItem Header="_Restore Backup..." Command="{Binding RestoreBackupCommand}"/>
@@ -232,6 +236,8 @@
                 <MenuItem Header="_Delete Hidden Entities" Command="{Binding DeleteHiddenEntitiesCommand}" ToolTip="Delete all hidden/invisible entities"/>
                 <MenuItem Header="Delete Entities _Outside Viewport" Command="{Binding DeleteEntitiesOutsideViewportCommand}" ToolTip="Delete all entities outside the current view"/>
                 <MenuItem Header="Delete _Empty Layers" Command="{Binding LayerPanel.DeleteEmptyLayersCommand}" ToolTip="Delete all layers with no entities"/>
+                <Separator/>
+                <MenuItem Header="Sc_ale Map..." Command="{Binding ShowScaleMapDialogCommand}" ToolTip="Scale all map entities by a factor"/>
             </MenuItem>
         </Menu>
 

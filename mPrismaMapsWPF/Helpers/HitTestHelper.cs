@@ -124,11 +124,14 @@ public static class HitTestHelper
 
         // Strip formatting codes to get actual visible text length
         string cleanText = StripMTextFormatting(mtext.Value);
+        // Use tolerance as minimum effective height so zero-height text (e.g. legacy imports)
+        // still has a reasonable hit area that matches its rendered minimum screen size.
+        double effectiveHeight = mtext.Height > 0 ? mtext.Height : tolerance;
         double width = mtext.RectangleWidth > 0
             ? mtext.RectangleWidth
-            : Math.Max(cleanText.Length * mtext.Height * 0.6, mtext.Height);
+            : Math.Max(cleanText.Length * effectiveHeight * 0.6, effectiveHeight);
         int lineCount = cleanText.Count(c => c == '\n') + 1;
-        double height = mtext.Height * lineCount;
+        double height = effectiveHeight * lineCount;
 
         double x = mtext.InsertPoint.X;
         double y = mtext.InsertPoint.Y;

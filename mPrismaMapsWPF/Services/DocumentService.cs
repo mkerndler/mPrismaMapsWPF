@@ -125,6 +125,22 @@ public class DocumentService : IDocumentService
         }
     }
 
+    public void LoadImported(ACadSharp.CadDocument document, string displayPath)
+    {
+        // FilePath is null so that Ctrl+S routes to Save As (DWG/DXF), not back to the JSON path.
+        CurrentDocument.Load(document, null);
+        CurrentDocument.IsDirty = true;
+
+        int entityCount = CurrentDocument.ModelSpaceEntities.Count();
+        int layerCount  = CurrentDocument.Layers.Count();
+
+        _logger.LogInformation(
+            "Loaded imported document from {DisplayPath}: {EntityCount} entities, {LayerCount} layers",
+            displayPath, entityCount, layerCount);
+
+        DocumentLoaded?.Invoke(this, new DocumentLoadedEventArgs(displayPath, entityCount, layerCount));
+    }
+
     public async Task<bool> SaveAsync(string? filePath = null, CancellationToken cancellationToken = default)
     {
         if (CurrentDocument.Document == null)

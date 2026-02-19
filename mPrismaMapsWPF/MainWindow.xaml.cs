@@ -60,6 +60,7 @@ public partial class MainWindow : Window
         _viewModel.ExportMpolRequested += OnExportMpolRequested;
         _viewModel.DeployMpolRequested += OnDeployMpolRequested;
         _viewModel.RestoreBackupRequested += OnRestoreBackupRequested;
+        _viewModel.ScaleMapRequested += OnScaleMapRequested;
 
         // Set up drawing mode binding
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
@@ -478,6 +479,20 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog() == true)
         {
             _viewModel.ViewRotation = dialog.Angle;
+        }
+    }
+
+    private void OnScaleMapRequested(object? sender, ScaleMapRequestedEventArgs e)
+    {
+        var dialog = new ScaleMapDialog
+        {
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            e.ScaleFactor = dialog.ScaleFactor;
+            e.Confirmed = true;
         }
     }
 

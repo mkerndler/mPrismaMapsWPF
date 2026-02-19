@@ -155,7 +155,7 @@ public class CadDocumentModel
         }
     }
 
-    public void Load(CadDocument document, string filePath)
+    public void Load(CadDocument document, string? filePath)
     {
         Document = document;
         FilePath = filePath;

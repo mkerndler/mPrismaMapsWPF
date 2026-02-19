@@ -110,8 +110,11 @@ public class PolylineTool : IDrawingTool
         return cadPoint;
     }
 
-    private static bool IsShiftHeld() =>
-        Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
+    private static bool IsShiftHeld()
+    {
+        try { return Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift); }
+        catch (InvalidOperationException) { return false; }
+    }
 
     private void Complete()
     {

@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Media;
 using ACadSharp.Entities;
 using mPrismaMapsWPF.Helpers;
+using mPrismaMapsWPF.Models;
 
 namespace mPrismaMapsWPF.Rendering.EntityRenderers;
 
@@ -73,6 +74,10 @@ public class TextRenderer : IEntityRenderer
 
         var position = renderContext.Transform(mtext.InsertPoint.X, mtext.InsertPoint.Y);
         double fontSize = renderContext.TransformDistance(mtext.Height);
+
+        // Enforce a minimum screen size for unit number labels so they stay readable when zoomed out.
+        if (mtext.Layer?.Name == CadDocumentModel.UnitNumbersLayerName)
+            fontSize = Math.Max(fontSize, 8.0);
 
         if (fontSize < 1)
             fontSize = 1;

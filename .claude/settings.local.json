@@ -25,7 +25,12 @@
       "Bash(cmd.exe /c \"attrib D:\\\\WorkSpaces\\\\mkerndler\\\\mPrismaMapsWPF\\\\mPrismaMapsWPF\\\\mPrismaMapsWPF\\\\Helpers\\\\SnapHelper.cs\")",
       "Bash(chmod:*)",
       "Bash(powershell.exe -Command \":*)",
-      "Bash(dotnet build:*)"
+      "Bash(dotnet build:*)",
+      "Bash(grep:*)",
+      "Bash(powershell.exe -Command \"[System.Reflection.Assembly]::LoadFile\\(''D:\\\\WorkSpaces\\\\mkerndler\\\\mPrismaMapsWPF\\\\mPrismaMapsWPF\\\\mPrismaMapsWPF\\\\bin\\\\Debug\\\\net10.0-windows\\\\ACadSharp.dll''\\) | Out-Null; [ACadSharp.Entities.MText].GetProperties\\(\\) | Select-Object Name, PropertyType | Where-Object { 1 }\")",
+      "Bash(powershell.exe -Command \"$asm = [System.Reflection.Assembly]::LoadFile\\(''D:\\\\WorkSpaces\\\\mkerndler\\\\mPrismaMapsWPF\\\\mPrismaMapsWPF\\\\mPrismaMapsWPF\\\\bin\\\\Debug\\\\net10.0-windows\\\\ACadSharp.dll''\\); $t = $asm.GetType\\(''ACadSharp.Entities.MText''\\); $t.GetProperties\\(\\) | Select-Object Name, PropertyType | Format-Table\")",
+      "Bash(cmd.exe /c \"mkdir C:\\\\Temp\\\\ReflectAcad 2>nul & echo done\")",
+      "Bash(dotnet run:*)"
     ]
   }
 }
