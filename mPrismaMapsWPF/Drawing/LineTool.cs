@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using mPrismaMapsWPF.Helpers;
 
 namespace mPrismaMapsWPF.Drawing;
 
@@ -14,7 +15,7 @@ public class LineTool : IDrawingTool
     public bool IsPreviewClosed => false;
 
     public string StatusText => _startPoint.HasValue
-        ? "Click to set end point, or press Escape to cancel"
+        ? "Click to set end point | Hold Shift to snap angle | Escape to cancel"
         : "Click to set start point";
 
     public event EventHandler<DrawingCompletedEventArgs>? Completed;
@@ -39,7 +40,8 @@ public class LineTool : IDrawingTool
         else
         {
             // Complete the line
-            var points = new List<Point> { _startPoint.Value, cadPoint };
+            var snapped = ApplyAngleSnap(cadPoint);
+            var points = new List<Point> { _startPoint.Value, snapped };
             Reset();
             Completed?.Invoke(this, new DrawingCompletedEventArgs(points, false, Mode));
         }
@@ -47,7 +49,7 @@ public class LineTool : IDrawingTool
 
     public void OnMouseMove(Point cadPoint)
     {
-        _currentPoint = cadPoint;
+        _currentPoint = ApplyAngleSnap(cadPoint);
     }
 
     public void OnMouseUp(Point cadPoint, MouseButton button)
@@ -76,6 +78,16 @@ public class LineTool : IDrawingTool
         _startPoint = null;
         _currentPoint = default;
     }
+
+    private Point ApplyAngleSnap(Point cadPoint)
+    {
+        if (_startPoint.HasValue && IsShiftHeld())
+            return SnapHelper.SnapToAngle(_startPoint.Value, cadPoint);
+        return cadPoint;
+    }
+
+    private static bool IsShiftHeld() =>
+        Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
 
     private void Cancel()
     {

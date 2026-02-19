@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using mPrismaMapsWPF.Helpers;
 
 namespace mPrismaMapsWPF.Drawing;
 
@@ -70,6 +71,10 @@ public class FairwayTool : IDrawingTool
             }
         }
 
+        // Apply angle snap only if no node was snapped and we have a previous point
+        if (snappedHandle == null && _points.Count > 0 && IsShiftHeld())
+            cadPoint = SnapHelper.SnapToAngle(_points[^1], cadPoint);
+
         // Determine previous node handle
         ulong? previousNodeHandle = null;
         if (_points.Count > 0)
@@ -97,7 +102,10 @@ public class FairwayTool : IDrawingTool
 
     public void OnMouseMove(Point cadPoint)
     {
-        _currentPoint = cadPoint;
+        if (_points.Count > 0 && IsShiftHeld() && FindSnapNode(cadPoint) == null)
+            _currentPoint = SnapHelper.SnapToAngle(_points[^1], cadPoint);
+        else
+            _currentPoint = cadPoint;
     }
 
     public void OnMouseUp(Point cadPoint, MouseButton button)
@@ -148,6 +156,9 @@ public class FairwayTool : IDrawingTool
         Reset();
         // Don't fire Cancelled - just end the current chain so the next click starts fresh
     }
+
+    private static bool IsShiftHeld() =>
+        Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
 
     private (ulong handle, double x, double y)? FindSnapNode(Point cadPoint)
     {

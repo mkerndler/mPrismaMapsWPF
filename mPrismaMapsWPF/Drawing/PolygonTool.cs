@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Input;
+using mPrismaMapsWPF.Helpers;
 
 namespace mPrismaMapsWPF.Drawing;
 
@@ -19,8 +20,8 @@ public class PolygonTool : IDrawingTool
     {
         0 => "Click to set first point",
         1 => "Click to add points (minimum 3 for polygon)",
-        2 => "Click to add points, double-click or Enter to close, Escape to cancel",
-        _ => $"{_points.Count} points - Click to add, double-click or Enter to close, Escape to cancel"
+        2 => "Click to add points | Hold Shift to snap angle | double-click or Enter to close | Escape to cancel",
+        _ => $"{_points.Count} points - Click to add | Hold Shift to snap angle | double-click or Enter to close | Escape to cancel"
     };
 
     public event EventHandler<DrawingCompletedEventArgs>? Completed;
@@ -54,13 +55,13 @@ public class PolygonTool : IDrawingTool
         }
         _lastClickTime = now;
 
-        _points.Add(cadPoint);
-        _currentPoint = cadPoint;
+        _points.Add(ApplyAngleSnap(cadPoint));
+        _currentPoint = _points[^1];
     }
 
     public void OnMouseMove(Point cadPoint)
     {
-        _currentPoint = cadPoint;
+        _currentPoint = ApplyAngleSnap(cadPoint);
     }
 
     public void OnMouseUp(Point cadPoint, MouseButton button)
@@ -102,6 +103,16 @@ public class PolygonTool : IDrawingTool
         _currentPoint = default;
         _lastClickTime = DateTime.MinValue;
     }
+
+    private Point ApplyAngleSnap(Point cadPoint)
+    {
+        if (_points.Count > 0 && IsShiftHeld())
+            return SnapHelper.SnapToAngle(_points[^1], cadPoint);
+        return cadPoint;
+    }
+
+    private static bool IsShiftHeld() =>
+        Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
 
     private void Complete()
     {

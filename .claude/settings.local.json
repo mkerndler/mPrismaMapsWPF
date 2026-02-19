@@ -6,7 +6,26 @@
       "Bash(findstr:*)",
       "Bash(curl:*)",
       "Bash(dotnet restore:*)",
-      "Bash(dotnet test:*)"
+      "Bash(dotnet test:*)",
+      "Bash(dotnet publish:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)",
+      "Bash(gh auth status:*)",
+      "Bash(git config:*)",
+      "Bash(cmdkey /delete:git:https://github.com)",
+      "Bash(cmdkey:*)",
+      "Bash(git credential-manager:*)",
+      "Bash(printf:*)",
+      "Bash(git credential reject:*)",
+      "Bash(where:*)",
+      "Bash(icacls:*)",
+      "Bash(cmd.exe /c \"icacls \"\"D:\\\\WorkSpaces\\\\mkerndler\\\\mPrismaMapsWPF\\\\mPrismaMapsWPF\\\\mPrismaMapsWPF\\\\Helpers\\\\SnapHelper.cs\"\" /grant %USERNAME%:\\(M\\)\")",
+      "Bash(cmd.exe /c \"attrib D:\\\\WorkSpaces\\\\mkerndler\\\\mPrismaMapsWPF\\\\mPrismaMapsWPF\\\\mPrismaMapsWPF\\\\Helpers\\\\SnapHelper.cs\")",
+      "Bash(chmod:*)",
+      "Bash(powershell.exe -Command \":*)",
+      "Bash(dotnet build:*)"
     ]
   }
 }
