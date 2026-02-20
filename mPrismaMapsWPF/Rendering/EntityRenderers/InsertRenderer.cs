@@ -1,5 +1,5 @@
-using System.Windows.Media;
 using ACadSharp.Entities;
+using SkiaSharp;
 
 namespace mPrismaMapsWPF.Rendering.EntityRenderers;
 
@@ -14,7 +14,7 @@ public class InsertRenderer : IEntityRenderer
 
     public bool CanRender(Entity entity) => entity is Insert;
 
-    public void Render(DrawingContext context, Entity entity, RenderContext renderContext)
+    public void Render(SKCanvas canvas, Entity entity, RenderContext renderContext)
     {
         if (entity is not Insert insert)
             return;
@@ -23,22 +23,26 @@ public class InsertRenderer : IEntityRenderer
             return;
 
         var position = renderContext.Transform(insert.InsertPoint.X, insert.InsertPoint.Y);
-
-        context.PushTransform(new TranslateTransform(position.X, position.Y));
-
-        context.PushTransform(new ScaleTransform(
-            insert.XScale * renderContext.Scale,
-            insert.YScale * renderContext.Scale));
+        float px = (float)position.X;
+        float py = (float)position.Y;
 
         double rotation = insert.Rotation * 180 / Math.PI;
+
+        canvas.Save();
+
+        // Build composed transform: translate to pos, scale, rotate, translate back
+        var m = SKMatrix.CreateTranslation(px, py);
+        m = SKMatrix.Concat(m, SKMatrix.CreateScale(
+            (float)(insert.XScale * renderContext.Scale),
+            (float)(insert.YScale * renderContext.Scale)));
         if (Math.Abs(rotation) > 0.01)
-        {
-            context.PushTransform(new RotateTransform(-rotation));
-        }
+            m = SKMatrix.Concat(m, SKMatrix.CreateRotationDegrees(-(float)rotation));
+        m = SKMatrix.Concat(m, SKMatrix.CreateTranslation(-px, -py));
+        canvas.Concat(in m);
 
-        context.PushTransform(new TranslateTransform(-position.X, -position.Y));
-
-        Color blockColor = renderContext.IsSelected(insert) ? Colors.Cyan : renderContext.DefaultColor;
+        var blockColor = renderContext.IsSelected(insert)
+            ? System.Windows.Media.Colors.Cyan
+            : renderContext.DefaultColor;
 
         var blockContext = new RenderContext
         {
@@ -63,18 +67,10 @@ public class InsertRenderer : IEntityRenderer
         {
             if (blockContext.IsLayerVisible(blockEntity))
             {
-                _renderService.RenderEntity(context, blockEntity, blockContext);
+                _renderService.RenderEntity(canvas, blockEntity, blockContext);
             }
         }
 
-        context.Pop();
-
-        if (Math.Abs(rotation) > 0.01)
-        {
-            context.Pop();
-        }
-
-        context.Pop();
-        context.Pop();
+        canvas.Restore();
     }
 }

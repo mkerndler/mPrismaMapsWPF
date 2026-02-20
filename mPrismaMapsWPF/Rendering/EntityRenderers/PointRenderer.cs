@@ -1,43 +1,32 @@
-using System.Windows.Media;
 using ACadSharp.Entities;
 using mPrismaMapsWPF.Helpers;
+using SkiaSharp;
 using Point = ACadSharp.Entities.Point;
 
 namespace mPrismaMapsWPF.Rendering.EntityRenderers;
 
 public class PointRenderer : IEntityRenderer
 {
-    private const double PointSize = 4.0;
+    private const float PointSize = 4f;
 
     public bool CanRender(Entity entity) => entity is Point;
 
-    public void Render(DrawingContext context, Entity entity, RenderContext renderContext)
+    public void Render(SKCanvas canvas, Entity entity, RenderContext renderContext)
     {
         if (entity is not Point point)
             return;
 
         var center = renderContext.Transform(point.Location.X, point.Location.Y);
+        float cx = (float)center.X;
+        float cy = (float)center.Y;
 
-        Color color;
-        if (renderContext.IsSelected(point))
-        {
-            color = Colors.Cyan;
-        }
-        else
-        {
-            color = ColorHelper.GetEntityColor(point, renderContext.DefaultColor);
-        }
+        SKColor color = renderContext.IsSelected(point) ? SKColors.Cyan
+            : ColorHelper.GetEntityColor(point, renderContext.DefaultColor).ToSKColor();
 
-        var brush = RenderCache.GetBrush(color);
-        var pen = RenderCache.GetPen(color, 1);
+        canvas.DrawCircle(cx, cy, PointSize / 2, SkiaRenderCache.GetFillPaint(color));
 
-        context.DrawEllipse(brush, null, center, PointSize / 2, PointSize / 2);
-
-        context.DrawLine(pen,
-            new System.Windows.Point(center.X - PointSize, center.Y),
-            new System.Windows.Point(center.X + PointSize, center.Y));
-        context.DrawLine(pen,
-            new System.Windows.Point(center.X, center.Y - PointSize),
-            new System.Windows.Point(center.X, center.Y + PointSize));
+        var strokePaint = SkiaRenderCache.GetStrokePaint(color, 1f);
+        canvas.DrawLine(cx - PointSize, cy, cx + PointSize, cy, strokePaint);
+        canvas.DrawLine(cx, cy - PointSize, cx, cy + PointSize, strokePaint);
     }
 }

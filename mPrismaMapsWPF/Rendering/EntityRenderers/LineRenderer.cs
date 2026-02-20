@@ -1,6 +1,6 @@
-using System.Windows.Media;
 using ACadSharp.Entities;
 using mPrismaMapsWPF.Helpers;
+using SkiaSharp;
 
 namespace mPrismaMapsWPF.Rendering.EntityRenderers;
 
@@ -8,7 +8,7 @@ public class LineRenderer : IEntityRenderer
 {
     public bool CanRender(Entity entity) => entity is Line;
 
-    public void Render(DrawingContext context, Entity entity, RenderContext renderContext)
+    public void Render(SKCanvas canvas, Entity entity, RenderContext renderContext)
     {
         if (entity is not Line line)
             return;
@@ -16,25 +16,18 @@ public class LineRenderer : IEntityRenderer
         var start = renderContext.Transform(line.StartPoint.X, line.StartPoint.Y);
         var end = renderContext.Transform(line.EndPoint.X, line.EndPoint.Y);
 
-        var pen = GetPen(line, renderContext);
-        context.DrawLine(pen, start, end);
+        canvas.DrawLine(
+            (float)start.X, (float)start.Y,
+            (float)end.X, (float)end.Y,
+            GetStrokePaint(line, renderContext));
     }
 
-    private static Pen GetPen(Line line, RenderContext renderContext)
+    private static SKPaint GetStrokePaint(Entity entity, RenderContext rc)
     {
-        Color color;
-        double thickness = renderContext.LineThickness;
-
-        if (renderContext.IsSelected(line))
-        {
-            color = Colors.Cyan;
-            thickness *= 2;
-        }
-        else
-        {
-            color = ColorHelper.GetEntityColor(line, renderContext.DefaultColor);
-        }
-
-        return RenderCache.GetPen(color, thickness);
+        SKColor color = rc.IsSelected(entity) ? SKColors.Cyan
+            : ColorHelper.GetEntityColor(entity, rc.DefaultColor).ToSKColor();
+        float thickness = rc.IsSelected(entity)
+            ? (float)rc.LineThickness * 2 : (float)rc.LineThickness;
+        return SkiaRenderCache.GetStrokePaint(color, thickness);
     }
 }

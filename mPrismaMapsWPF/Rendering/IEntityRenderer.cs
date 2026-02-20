@@ -1,21 +1,22 @@
 using System.Windows;
-using System.Windows.Media;
 using ACadSharp.Entities;
+using SkiaSharp;
 using WpfPoint = System.Windows.Point;
+using WpfColor = System.Windows.Media.Color;
 
 namespace mPrismaMapsWPF.Rendering;
 
 public interface IEntityRenderer
 {
     bool CanRender(Entity entity);
-    void Render(DrawingContext context, Entity entity, RenderContext renderContext);
+    void Render(SKCanvas canvas, Entity entity, RenderContext renderContext);
 }
 
 public class RenderContext
 {
     public double Scale { get; set; } = 1.0;
     public WpfPoint Offset { get; set; }
-    public Color DefaultColor { get; set; } = Colors.White;
+    public WpfColor DefaultColor { get; set; } = System.Windows.Media.Colors.White;
     public double LineThickness { get; set; } = 1.0;
     public bool ShowSelection { get; set; } = true;
     public HashSet<ulong> SelectedHandles { get; } = new();

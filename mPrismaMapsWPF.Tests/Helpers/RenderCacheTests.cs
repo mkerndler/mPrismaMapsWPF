@@ -1,6 +1,6 @@
-using System.Windows.Media;
 using FluentAssertions;
 using mPrismaMapsWPF.Helpers;
+using SkiaSharp;
 
 namespace mPrismaMapsWPF.Tests.Helpers;
 
@@ -8,71 +8,62 @@ public class RenderCacheTests
 {
     public RenderCacheTests()
     {
-        RenderCache.Clear();
+        SkiaRenderCache.Clear();
     }
 
     [Fact]
-    public void GetPen_ReturnsCachedPenOnSecondCall()
+    public void GetStrokePaint_ReturnsCachedPaintOnSecondCall()
     {
-        var pen1 = RenderCache.GetPen(Colors.Red, 1.0);
-        var pen2 = RenderCache.GetPen(Colors.Red, 1.0);
-        pen1.Should().BeSameAs(pen2);
+        var paint1 = SkiaRenderCache.GetStrokePaint(SKColors.Red, 1.0f);
+        var paint2 = SkiaRenderCache.GetStrokePaint(SKColors.Red, 1.0f);
+        paint1.Should().BeSameAs(paint2);
     }
 
     [Fact]
-    public void GetPen_DifferentParameters_ReturnsDifferentPens()
+    public void GetStrokePaint_DifferentColor_ReturnsDifferentPaint()
     {
-        var pen1 = RenderCache.GetPen(Colors.Red, 1.0);
-        var pen2 = RenderCache.GetPen(Colors.Blue, 1.0);
-        pen1.Should().NotBeSameAs(pen2);
+        var paint1 = SkiaRenderCache.GetStrokePaint(SKColors.Red, 1.0f);
+        var paint2 = SkiaRenderCache.GetStrokePaint(SKColors.Blue, 1.0f);
+        paint1.Should().NotBeSameAs(paint2);
     }
 
     [Fact]
-    public void GetBrush_ReturnsFrozenBrush()
+    public void GetStrokePaint_DifferentThickness_ReturnsDifferentPaint()
     {
-        var brush = RenderCache.GetBrush(Colors.Green);
-        brush.IsFrozen.Should().BeTrue();
+        var paint1 = SkiaRenderCache.GetStrokePaint(SKColors.Red, 1.0f);
+        var paint2 = SkiaRenderCache.GetStrokePaint(SKColors.Red, 2.0f);
+        paint1.Should().NotBeSameAs(paint2);
     }
 
     [Fact]
-    public void GetBrush_ReturnsCachedOnSecondCall()
+    public void GetStrokePaint_IsStrokeStyle()
     {
-        var brush1 = RenderCache.GetBrush(Colors.Red);
-        var brush2 = RenderCache.GetBrush(Colors.Red);
-        brush1.Should().BeSameAs(brush2);
+        var paint = SkiaRenderCache.GetStrokePaint(SKColors.Green, 1.5f);
+        paint.Style.Should().Be(SKPaintStyle.Stroke);
     }
 
     [Fact]
-    public void Clear_EmptiesAllCaches()
+    public void GetFillPaint_ReturnsCachedPaintOnSecondCall()
     {
-        var pen1 = RenderCache.GetPen(Colors.Red, 1.0);
-        RenderCache.Clear();
-        var pen2 = RenderCache.GetPen(Colors.Red, 1.0);
-        // After clearing, a new pen should be created (may or may not be same reference depending on implementation)
-        pen2.Should().NotBeNull();
+        var paint1 = SkiaRenderCache.GetFillPaint(SKColors.Red);
+        var paint2 = SkiaRenderCache.GetFillPaint(SKColors.Red);
+        paint1.Should().BeSameAs(paint2);
     }
 
     [Fact]
-    public void GetPen_ReturnsFrozenPen()
+    public void GetFillPaint_IsFillStyle()
     {
-        var pen = RenderCache.GetPen(Colors.Red, 1.0);
-        pen.IsFrozen.Should().BeTrue();
+        var paint = SkiaRenderCache.GetFillPaint(SKColors.Green);
+        paint.Style.Should().Be(SKPaintStyle.Fill);
     }
 
     [Fact]
-    public void GetRotateTransform_ReturnsFrozenTransform()
+    public void Clear_CausesNewInstanceOnNextCall()
     {
-        var transform = RenderCache.GetRotateTransform(45.0);
-        transform.IsFrozen.Should().BeTrue();
-        transform.Angle.Should().Be(45.0);
-    }
-
-    [Fact]
-    public void GetScaleTransform_ReturnsFrozenTransform()
-    {
-        var transform = RenderCache.GetScaleTransform(2.0, 3.0);
-        transform.IsFrozen.Should().BeTrue();
-        transform.ScaleX.Should().Be(2.0);
-        transform.ScaleY.Should().Be(3.0);
+        var paint1 = SkiaRenderCache.GetStrokePaint(SKColors.Red, 1.0f);
+        SkiaRenderCache.Clear();
+        var paint2 = SkiaRenderCache.GetStrokePaint(SKColors.Red, 1.0f);
+        paint2.Should().NotBeNull();
+        paint2.Should().NotBeSameAs(paint1);
     }
 }

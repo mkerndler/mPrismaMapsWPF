@@ -1,6 +1,7 @@
 using System.Windows.Media;
 using ACadSharp.Entities;
 using ACadSharp.Tables;
+using SkiaSharp;
 using WpfColor = System.Windows.Media.Color;
 
 namespace mPrismaMapsWPF.Helpers;
@@ -173,4 +174,6 @@ public static class ColorHelper
         var brush = GetEntityBrush(entity, defaultColor);
         return new Pen(brush, thickness);
     }
+
+    public static SKColor ToSKColor(this WpfColor c) => new SKColor(c.R, c.G, c.B, c.A);
 }

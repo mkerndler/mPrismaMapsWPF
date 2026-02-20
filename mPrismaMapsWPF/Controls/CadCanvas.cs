@@ -8,14 +8,19 @@ using mPrismaMapsWPF.Drawing;
 using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Rendering;
+using SkiaSharp;
 using WpfPoint = System.Windows.Point;
+using WpfColor = System.Windows.Media.Color;
 
 namespace mPrismaMapsWPF.Controls;
 
 public class CadCanvas : FrameworkElement
 {
     private readonly RenderService _renderService;
-    private readonly DrawingVisual _drawingVisual;
+
+    // Thin overlay visual updated synchronously on every mouse move so drawing
+    // preview responds immediately without waiting for the next vsync tick.
+    private readonly DrawingVisual _previewVisual;
     private readonly VisualCollection _visuals;
 
     private WpfPoint _panStart;
@@ -27,30 +32,32 @@ public class CadCanvas : FrameworkElement
     // View transforms
     private bool _flipX;
     private bool _flipY;
-    private double _viewRotation; // degrees
+    private double _viewRotation;
 
-    // Bitmap caching for performance
-    private RenderTargetBitmap? _cachedBitmap;
+    // Entity cache: Skia renders into a WriteableBitmap → WPF uploads to GPU once →
+    // subsequent DrawImage calls are free GPU texture blits.
+    private WriteableBitmap? _cachedBitmap;
     private double _cachedScale;
     private WpfPoint _cachedOffset;
     private int _cachedWidth;
     private int _cachedHeight;
     private bool _cacheValid;
-    private HashSet<ulong>? _cachedSelectedHandles;
     private HashSet<string>? _cachedHiddenLayers;
+
+    // Overlay cache: selection + path-highlight, transparent background.
+    // Also a WriteableBitmap → GPU texture. Rebuilt only when selection/highlight changes.
+    private WriteableBitmap? _overlayBitmap;
+    private bool _overlayValid;
+    private HashSet<ulong>? _cachedSelectedHandles;
+    private HashSet<ulong>? _cachedHighlightHandles;
 
     // Spatial index for hit testing
     private SpatialGrid? _spatialGrid;
-
-    // Handle -> Entity lookup for fast selection overlay rendering
     private Dictionary<ulong, Entity>? _entityByHandle;
-
-    // Cached selected handles HashSet (rebuilt only when SelectedHandles property changes)
     private HashSet<ulong> _selectedHandlesSet = new();
-
-    // Locked entity/layer sets for preventing interaction
     private HashSet<ulong> _lockedHandlesSet = new();
     private HashSet<string> _lockedLayersSet = new();
+    private HashSet<string> _currentHiddenLayers = new(); // cached to avoid per-frame allocation
 
     // Cached viewport bounds per frame
     private Rect? _frameViewportBounds;
@@ -59,22 +66,22 @@ public class CadCanvas : FrameworkElement
     private IDrawingTool? _currentTool;
     private WpfPoint _currentCadPoint;
 
-    // Marquee selection state
+    // Marquee selection
     private bool _isMarqueeSelecting;
     private WpfPoint _marqueeStartScreen;
     private WpfPoint _marqueeCurrentScreen;
 
-    // Move drag state
+    // Move drag
     private bool _isMoving;
     private WpfPoint _moveStartCadPoint;
     private WpfPoint _moveCurrentCadPoint;
 
-    // Grid rendering
-    private static readonly Pen GridPenMinor = CreateGridPen(Color.FromArgb(40, 128, 128, 128));
-    private static readonly Pen GridPenMajor = CreateGridPen(Color.FromArgb(80, 128, 128, 128));
+    // Static WPF pens for GPU-rendered overlays
+    private static readonly Pen GridPenMinor = CreateGridPen(WpfColor.FromArgb(40, 128, 128, 128));
+    private static readonly Pen GridPenMajor = CreateGridPen(WpfColor.FromArgb(80, 128, 128, 128));
     private static readonly Pen PreviewPen = CreatePreviewPen();
 
-    private static Pen CreateGridPen(Color color)
+    private static Pen CreateGridPen(WpfColor color)
     {
         var pen = new Pen(new SolidColorBrush(color), 1);
         pen.Freeze();
@@ -91,8 +98,8 @@ public class CadCanvas : FrameworkElement
     public CadCanvas()
     {
         _renderService = new RenderService();
-        _drawingVisual = new DrawingVisual();
-        _visuals = new VisualCollection(this) { _drawingVisual };
+        _previewVisual = new DrawingVisual();
+        _visuals = new VisualCollection(this) { _previewVisual };
 
         ClipToBounds = true;
         Focusable = true;
@@ -107,12 +114,16 @@ public class CadCanvas : FrameworkElement
         KeyDown += OnKeyDown;
     }
 
+    protected override int VisualChildrenCount => _visuals.Count;
+    protected override Visual GetVisualChild(int index) => _visuals[index];
+
+    protected override void OnRender(DrawingContext dc) => RenderFrame(dc);
+
+    // ── Dependency properties ────────────────────────────────────────────────
+
     public static readonly DependencyProperty EntitiesProperty =
-        DependencyProperty.Register(
-            nameof(Entities),
-            typeof(IEnumerable<Entity>),
-            typeof(CadCanvas),
-            new PropertyMetadata(null, OnEntitiesChanged));
+        DependencyProperty.Register(nameof(Entities), typeof(IEnumerable<Entity>),
+            typeof(CadCanvas), new PropertyMetadata(null, OnEntitiesChanged));
 
     public IEnumerable<Entity>? Entities
     {
@@ -121,11 +132,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty SelectedHandlesProperty =
-        DependencyProperty.Register(
-            nameof(SelectedHandles),
-            typeof(IEnumerable<ulong>),
-            typeof(CadCanvas),
-            new PropertyMetadata(null, OnSelectedHandlesChanged));
+        DependencyProperty.Register(nameof(SelectedHandles), typeof(IEnumerable<ulong>),
+            typeof(CadCanvas), new PropertyMetadata(null, OnSelectedHandlesChanged));
 
     public IEnumerable<ulong>? SelectedHandles
     {
@@ -134,11 +142,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty HiddenLayersProperty =
-        DependencyProperty.Register(
-            nameof(HiddenLayers),
-            typeof(IEnumerable<string>),
-            typeof(CadCanvas),
-            new PropertyMetadata(null, OnHiddenLayersChanged));
+        DependencyProperty.Register(nameof(HiddenLayers), typeof(IEnumerable<string>),
+            typeof(CadCanvas), new PropertyMetadata(null, OnHiddenLayersChanged));
 
     public IEnumerable<string>? HiddenLayers
     {
@@ -147,11 +152,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty LockedLayersProperty =
-        DependencyProperty.Register(
-            nameof(LockedLayers),
-            typeof(IEnumerable<string>),
-            typeof(CadCanvas),
-            new PropertyMetadata(null, OnLockedLayersChanged));
+        DependencyProperty.Register(nameof(LockedLayers), typeof(IEnumerable<string>),
+            typeof(CadCanvas), new PropertyMetadata(null, OnLockedLayersChanged));
 
     public IEnumerable<string>? LockedLayers
     {
@@ -160,11 +162,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty LockedHandlesProperty =
-        DependencyProperty.Register(
-            nameof(LockedHandles),
-            typeof(IEnumerable<ulong>),
-            typeof(CadCanvas),
-            new PropertyMetadata(null, OnLockedHandlesChanged));
+        DependencyProperty.Register(nameof(LockedHandles), typeof(IEnumerable<ulong>),
+            typeof(CadCanvas), new PropertyMetadata(null, OnLockedHandlesChanged));
 
     public IEnumerable<ulong>? LockedHandles
     {
@@ -173,11 +172,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty IsPanModeProperty =
-        DependencyProperty.Register(
-            nameof(IsPanMode),
-            typeof(bool),
-            typeof(CadCanvas),
-            new PropertyMetadata(false));
+        DependencyProperty.Register(nameof(IsPanMode), typeof(bool),
+            typeof(CadCanvas), new PropertyMetadata(false));
 
     public bool IsPanMode
     {
@@ -186,11 +182,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty ExtentsProperty =
-        DependencyProperty.Register(
-            nameof(Extents),
-            typeof(Extents),
-            typeof(CadCanvas),
-            new PropertyMetadata(null, OnExtentsChanged));
+        DependencyProperty.Register(nameof(Extents), typeof(Extents),
+            typeof(CadCanvas), new PropertyMetadata(null, OnExtentsChanged));
 
     public Extents? Extents
     {
@@ -199,11 +192,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty DrawingModeProperty =
-        DependencyProperty.Register(
-            nameof(DrawingMode),
-            typeof(DrawingMode),
-            typeof(CadCanvas),
-            new PropertyMetadata(DrawingMode.Select, OnDrawingModeChanged));
+        DependencyProperty.Register(nameof(DrawingMode), typeof(DrawingMode),
+            typeof(CadCanvas), new PropertyMetadata(DrawingMode.Select, OnDrawingModeChanged));
 
     public DrawingMode DrawingMode
     {
@@ -212,11 +202,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty GridSettingsProperty =
-        DependencyProperty.Register(
-            nameof(GridSettings),
-            typeof(GridSnapSettings),
-            typeof(CadCanvas),
-            new PropertyMetadata(null, OnGridSettingsChanged));
+        DependencyProperty.Register(nameof(GridSettings), typeof(GridSnapSettings),
+            typeof(CadCanvas), new PropertyMetadata(null, OnGridSettingsChanged));
 
     public GridSnapSettings? GridSettings
     {
@@ -225,11 +212,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty FlipXProperty =
-        DependencyProperty.Register(
-            nameof(FlipX),
-            typeof(bool),
-            typeof(CadCanvas),
-            new PropertyMetadata(false, OnViewTransformChanged));
+        DependencyProperty.Register(nameof(FlipX), typeof(bool),
+            typeof(CadCanvas), new PropertyMetadata(false, OnViewTransformChanged));
 
     public bool FlipX
     {
@@ -238,11 +222,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty FlipYProperty =
-        DependencyProperty.Register(
-            nameof(FlipY),
-            typeof(bool),
-            typeof(CadCanvas),
-            new PropertyMetadata(false, OnViewTransformChanged));
+        DependencyProperty.Register(nameof(FlipY), typeof(bool),
+            typeof(CadCanvas), new PropertyMetadata(false, OnViewTransformChanged));
 
     public bool FlipY
     {
@@ -251,11 +232,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty ViewRotationProperty =
-        DependencyProperty.Register(
-            nameof(ViewRotation),
-            typeof(double),
-            typeof(CadCanvas),
-            new PropertyMetadata(0.0, OnViewTransformChanged));
+        DependencyProperty.Register(nameof(ViewRotation), typeof(double),
+            typeof(CadCanvas), new PropertyMetadata(0.0, OnViewTransformChanged));
 
     public double ViewRotation
     {
@@ -264,11 +242,8 @@ public class CadCanvas : FrameworkElement
     }
 
     public static readonly DependencyProperty HighlightedPathHandlesProperty =
-        DependencyProperty.Register(
-            nameof(HighlightedPathHandles),
-            typeof(HashSet<ulong>),
-            typeof(CadCanvas),
-            new PropertyMetadata(null, OnHighlightedPathHandlesChanged));
+        DependencyProperty.Register(nameof(HighlightedPathHandles), typeof(HashSet<ulong>),
+            typeof(CadCanvas), new PropertyMetadata(null, OnHighlightedPathHandlesChanged));
 
     public HashSet<ulong>? HighlightedPathHandles
     {
@@ -278,12 +253,10 @@ public class CadCanvas : FrameworkElement
 
     private static void OnHighlightedPathHandlesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is CadCanvas canvas)
-        {
-            canvas.InvalidateCache();
-            canvas.Render();
-        }
+        if (d is CadCanvas canvas) { canvas._overlayValid = false; canvas.Render(); }
     }
+
+    // ── Events ───────────────────────────────────────────────────────────────
 
     public event EventHandler<CadMouseEventArgs>? CadMouseMove;
     public event EventHandler<CadEntityClickEventArgs>? EntityClicked;
@@ -293,149 +266,546 @@ public class CadCanvas : FrameworkElement
     public event EventHandler<MoveCompletedEventArgs>? MoveCompleted;
     public event EventHandler<ToggleEntranceEventArgs>? ToggleEntranceRequested;
 
+    // ── Public API ───────────────────────────────────────────────────────────
+
     public double Scale
     {
         get => _scale;
-        set
-        {
-            _scale = Math.Max(0.001, Math.Min(1000, value));
-            InvalidateCache(); // Scale changed
-            Render();
-        }
+        set { _scale = Math.Max(0.001, Math.Min(1000, value)); InvalidateCache(); Render(); }
     }
 
     public void ZoomToFit()
     {
         var extents = Extents ?? _extents;
-        if (extents == null || !extents.IsValid || ActualWidth <= 0 || ActualHeight <= 0)
-            return;
+        if (extents == null || !extents.IsValid || ActualWidth <= 0 || ActualHeight <= 0) return;
 
         double margin = 50;
-        double availableWidth = ActualWidth - margin * 2;
-        double availableHeight = ActualHeight - margin * 2;
-
-        double scaleX = availableWidth / extents.Width;
-        double scaleY = availableHeight / extents.Height;
+        double scaleX = (ActualWidth - margin * 2) / extents.Width;
+        double scaleY = (ActualHeight - margin * 2) / extents.Height;
         _scale = Math.Min(scaleX, scaleY);
-
-        _offset = new WpfPoint(
-            -extents.CenterX + (ActualWidth / 2) / _scale,
-            extents.CenterY + (ActualHeight / 2) / _scale
-        );
-
-        InvalidateCache(); // View changed completely
+        _offset = new WpfPoint(-extents.CenterX + (ActualWidth / 2) / _scale,
+                                extents.CenterY + (ActualHeight / 2) / _scale);
+        InvalidateCache();
         Render();
     }
 
-    /// <summary>
-    /// Centers the view on the origin (0,0).
-    /// </summary>
     public void CenterOnOrigin()
     {
-        if (ActualWidth <= 0 || ActualHeight <= 0)
-            return;
-
-        _offset = new WpfPoint(
-            (ActualWidth / 2) / _scale,
-            (ActualHeight / 2) / _scale
-        );
-
+        if (ActualWidth <= 0 || ActualHeight <= 0) return;
+        _offset = new WpfPoint((ActualWidth / 2) / _scale, (ActualHeight / 2) / _scale);
         InvalidateCache();
         Render();
     }
 
-    /// <summary>
-    /// Resets all view transforms (flip, rotation) to default.
-    /// </summary>
-    public void ResetViewTransforms()
-    {
-        FlipX = false;
-        FlipY = false;
-        ViewRotation = 0;
-    }
+    public void ResetViewTransforms() { FlipX = false; FlipY = false; ViewRotation = 0; }
 
-    public void ZoomIn()
-    {
-        WpfPoint center = new(ActualWidth / 2, ActualHeight / 2);
-        ZoomAtPoint(center, 1.25);
-    }
+    public void ZoomIn()  { ZoomAtPoint(new WpfPoint(ActualWidth / 2, ActualHeight / 2), 1.25); }
+    public void ZoomOut() { ZoomAtPoint(new WpfPoint(ActualWidth / 2, ActualHeight / 2), 1.0 / 1.25); }
 
-    public void ZoomOut()
-    {
-        WpfPoint center = new(ActualWidth / 2, ActualHeight / 2);
-        ZoomAtPoint(center, 1.0 / 1.25);
-    }
-
-    /// <summary>
-    /// Zooms to fit the specified entity in the view.
-    /// </summary>
     public void ZoomToEntity(Entity entity)
     {
-        if (entity == null || ActualWidth <= 0 || ActualHeight <= 0)
-            return;
-
-        var entityExtents = new Extents();
-        entityExtents.Expand(entity);
-
-        if (!entityExtents.IsValid)
-            return;
-
-        ZoomToRect(entityExtents.MinX, entityExtents.MinY, entityExtents.MaxX, entityExtents.MaxY);
+        if (entity == null || ActualWidth <= 0 || ActualHeight <= 0) return;
+        var e = new Extents(); e.Expand(entity);
+        if (e.IsValid) ZoomToRect(e.MinX, e.MinY, e.MaxX, e.MaxY);
     }
 
-    /// <summary>
-    /// Zooms to fit the specified rectangle (in CAD coordinates) in the view.
-    /// </summary>
     public void ZoomToRect(double minX, double minY, double maxX, double maxY)
     {
-        if (ActualWidth <= 0 || ActualHeight <= 0)
-            return;
-
-        double width = maxX - minX;
-        double height = maxY - minY;
-        double centerX = (minX + maxX) / 2;
-        double centerY = (minY + maxY) / 2;
-
-        // Ensure minimum size for points or very small entities
-        if (width < 1) width = 100;
-        if (height < 1) height = 100;
-
+        if (ActualWidth <= 0 || ActualHeight <= 0) return;
+        double w = maxX - minX, h = maxY - minY;
+        if (w < 1) w = 100; if (h < 1) h = 100;
         double margin = 50;
-        double availableWidth = ActualWidth - margin * 2;
-        double availableHeight = ActualHeight - margin * 2;
-
-        double scaleX = availableWidth / width;
-        double scaleY = availableHeight / height;
-        _scale = Math.Min(scaleX, scaleY);
-
-        // Limit max zoom to prevent excessive zooming on small entities
-        _scale = Math.Min(_scale, 50);
-
-        _offset = new WpfPoint(
-            -centerX + (ActualWidth / 2) / _scale,
-            centerY + (ActualHeight / 2) / _scale
-        );
-
+        _scale = Math.Min(Math.Min((ActualWidth - margin * 2) / w, (ActualHeight - margin * 2) / h), 50);
+        _offset = new WpfPoint(-(minX + maxX) / 2 + (ActualWidth / 2) / _scale,
+                                (minY + maxY) / 2 + (ActualHeight / 2) / _scale);
         InvalidateCache();
         Render();
     }
 
-    public WpfPoint ScreenToCad(WpfPoint screenPoint)
+    public WpfPoint ScreenToCad(WpfPoint screenPoint) =>
+        new WpfPoint(screenPoint.X / _scale - _offset.X, -(screenPoint.Y / _scale - _offset.Y));
+
+    public WpfPoint GetSnappedCadPoint(WpfPoint screenPoint)
     {
-        return new WpfPoint(
-            screenPoint.X / _scale - _offset.X,
-            -(screenPoint.Y / _scale - _offset.Y)
-        );
+        var cad = ScreenToCad(screenPoint);
+        return (GridSettings != null && GridSettings.IsEnabled) ? SnapHelper.SnapToGrid(cad, GridSettings) : cad;
     }
 
-    public void Render()
+    // InvalidateVisual() coalesces all rapid Render() calls into at most one
+    // OnRender() call per vsync tick, eliminating render-thread sync stalls.
+    public void Render() => InvalidateVisual();
+
+    public void InvalidateCache()
     {
-        RenderWithCache(forceFullRender: false);
+        _cacheValid = false;
+        _cachedBitmap = null;
+        _overlayValid = false;
+        _overlayBitmap = null;
+    }
+
+    public Rect GetViewportBounds() => CalculateViewportBounds();
+
+    // ── Core rendering pipeline ──────────────────────────────────────────────
+
+    private void RenderFrame(DrawingContext dc)
+    {
+        dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, ActualWidth, ActualHeight));
+
+        if (ActualWidth <= 0 || ActualHeight <= 0) return;
+
+        _frameViewportBounds = CalculateViewportBounds();
+        int w = (int)ActualWidth, h = (int)ActualHeight;
+
+        ApplyViewTransform(dc, w, h);
+
+        // ── Entity cache + overlay (only when a document is loaded) ───────────
+        var entities = Entities;
+        if (entities != null)
+        {
+            bool scaleChanged     = Math.Abs(_scale - _cachedScale) > 0.0001;
+            bool sizeChanged      = w != _cachedWidth || h != _cachedHeight;
+            bool layersChanged    = !HiddenLayersMatchCache();
+            bool selectionChanged = !SelectionMatchesCache();
+            bool highlightChanged = !HighlightMatchesCache();
+
+            // Fast pan path: both GPU textures are valid, just offset them
+            if (_isPanning && _cacheValid && _overlayValid && !scaleChanged && !sizeChanged)
+            {
+                double dx = (_offset.X - _cachedOffset.X) * _scale;
+                double dy = (_offset.Y - _cachedOffset.Y) * _scale;
+                dc.DrawImage(_cachedBitmap, new Rect(dx, dy, w, h));
+                if (_selectedHandlesSet.Count > 0 || HighlightedPathHandles?.Count > 0)
+                    dc.DrawImage(_overlayBitmap, new Rect(dx, dy, w, h));
+                RestoreViewTransform(dc);
+                return;
+            }
+
+            if (!_cacheValid || scaleChanged || sizeChanged || layersChanged)
+            {
+                RebuildEntityCache(entities, w, h);
+                _overlayValid = false;
+            }
+
+            if (!_overlayValid || selectionChanged || highlightChanged)
+                RebuildOverlay(entities, w, h);
+
+            if (_cachedBitmap != null)
+                dc.DrawImage(_cachedBitmap, new Rect(0, 0, w, h));
+
+            if (_overlayBitmap != null && (_selectedHandlesSet.Count > 0 || HighlightedPathHandles?.Count > 0))
+                dc.DrawImage(_overlayBitmap, new Rect(0, 0, w, h));
+        }
+
+        // Grid stays in the entity layer (depends on scale/offset, not cursor)
+        RenderGrid(dc);
+
+        RestoreViewTransform(dc);
+    }
+
+    // ── Synchronous preview visual ───────────────────────────────────────────
+
+    /// <summary>
+    /// Redraws the preview DrawingVisual immediately (no vsync deferral).
+    /// Called directly from mouse-move handlers so the cursor preview is always
+    /// pixel-current regardless of the entity-layer redraw schedule.
+    /// </summary>
+    private void UpdatePreviewVisual()
+    {
+        if (ActualWidth <= 0 || ActualHeight <= 0) return;
+        using var dc = _previewVisual.RenderOpen();
+        int w = (int)ActualWidth, h = (int)ActualHeight;
+        ApplyViewTransform(dc, w, h);
+        RenderDrawingPreview(dc);
+        RenderMarqueePreview(dc);
+        RenderMovePreview(dc);
+        RestoreViewTransform(dc);
+    }
+
+    // ── Skia entity cache ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Renders all entities (no selection color) into a WriteableBitmap via Skia.
+    /// After this call the bitmap is uploaded to the GPU as a texture on the next
+    /// DrawingContext.DrawImage and cached there by WPF's compositor.
+    /// </summary>
+    private void RebuildEntityCache(IEnumerable<Entity> entities, int w, int h)
+    {
+        if (_cachedBitmap == null || _cachedBitmap.PixelWidth != w || _cachedBitmap.PixelHeight != h)
+            _cachedBitmap = new WriteableBitmap(w, h, 96, 96, PixelFormats.Pbgra32, null);
+
+        _cachedBitmap.Lock();
+        try
+        {
+            var info = new SKImageInfo(w, h, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var surface = SKSurface.Create(info, _cachedBitmap.BackBuffer, _cachedBitmap.BackBufferStride);
+            surface.Canvas.Clear(SKColors.Black);
+
+            var rc = new RenderContext
+            {
+                Scale = _scale,
+                Offset = _offset,
+                DefaultColor = System.Windows.Media.Colors.White,
+                LineThickness = 1.0,
+                ShowSelection = false,
+                ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds()
+            };
+            foreach (var layer in _currentHiddenLayers) rc.HiddenLayers.Add(layer);
+
+            _renderService.RenderEntities(surface.Canvas, entities, rc);
+            _cachedBitmap.AddDirtyRect(new Int32Rect(0, 0, w, h));
+        }
+        finally { _cachedBitmap.Unlock(); }
+
+        _cachedScale = _scale;
+        _cachedOffset = _offset;
+        _cachedWidth = w;
+        _cachedHeight = h;
+        _cachedHiddenLayers = HiddenLayers?.ToHashSet() ?? new HashSet<string>();
+        _cacheValid = true;
+    }
+
+    // ── Skia overlay cache ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Renders selected entities (cyan) and highlighted path entities (orange) into a
+    /// WriteableBitmap with a fully-transparent background. WPF alpha-blends this over
+    /// the entity cache via DrawingContext.DrawImage.
+    /// </summary>
+    private void RebuildOverlay(IEnumerable<Entity> entities, int w, int h)
+    {
+        if (_overlayBitmap == null || _overlayBitmap.PixelWidth != w || _overlayBitmap.PixelHeight != h)
+            _overlayBitmap = new WriteableBitmap(w, h, 96, 96, PixelFormats.Pbgra32, null);
+
+        _overlayBitmap.Lock();
+        try
+        {
+            var info = new SKImageInfo(w, h, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var surface = SKSurface.Create(info, _overlayBitmap.BackBuffer, _overlayBitmap.BackBufferStride);
+            surface.Canvas.Clear(SKColors.Transparent);
+
+            var viewport = _frameViewportBounds ?? CalculateViewportBounds();
+
+            // Selection overlay
+            if (_selectedHandlesSet.Count > 0)
+            {
+                var rc = new RenderContext
+                {
+                    Scale = _scale, Offset = _offset,
+                    DefaultColor = System.Windows.Media.Colors.White,
+                    LineThickness = 1.0, ShowSelection = true,
+                    ViewportBounds = viewport
+                };
+                foreach (var h2 in _selectedHandlesSet) rc.SelectedHandles.Add(h2);
+                foreach (var l in _currentHiddenLayers) rc.HiddenLayers.Add(l);
+
+                if (_entityByHandle != null)
+                {
+                    var sel = new List<Entity>(_selectedHandlesSet.Count);
+                    foreach (var handle in _selectedHandlesSet)
+                        if (_entityByHandle.TryGetValue(handle, out var e)) sel.Add(e);
+                    _renderService.RenderEntities(surface.Canvas, sel, rc);
+                }
+                else
+                {
+                    _renderService.RenderEntities(surface.Canvas,
+                        entities.Where(e => _selectedHandlesSet.Contains(e.Handle)), rc);
+                }
+            }
+
+            // Path-highlight overlay
+            var highlights = HighlightedPathHandles;
+            if (highlights != null && highlights.Count > 0 && _entityByHandle != null)
+            {
+                var rc = new RenderContext
+                {
+                    Scale = _scale, Offset = _offset,
+                    DefaultColor = System.Windows.Media.Colors.Orange,
+                    LineThickness = 3.0, ShowSelection = false,
+                    ViewportBounds = viewport
+                };
+                var highlighted = new List<Entity>();
+                foreach (var handle in highlights)
+                    if (_entityByHandle.TryGetValue(handle, out var e)) highlighted.Add(e);
+                _renderService.RenderEntities(surface.Canvas, highlighted, rc);
+            }
+
+            _overlayBitmap.AddDirtyRect(new Int32Rect(0, 0, w, h));
+        }
+        finally { _overlayBitmap.Unlock(); }
+
+        _overlayValid = true;
+        _cachedSelectedHandles = new HashSet<ulong>(_selectedHandlesSet);
+        _cachedHighlightHandles = HighlightedPathHandles != null
+            ? new HashSet<ulong>(HighlightedPathHandles) : null;
+    }
+
+    // ── WPF DrawingContext overlays (GPU-rendered) ───────────────────────────
+
+    private void ApplyViewTransform(DrawingContext dc, int width, int height)
+    {
+        if (!_flipX && !_flipY && Math.Abs(_viewRotation) < 0.001) return;
+
+        double cx = width / 2.0, cy = height / 2.0;
+        var tg = new TransformGroup();
+        if (_flipX || _flipY)
+            tg.Children.Add(new ScaleTransform(_flipX ? -1 : 1, _flipY ? -1 : 1, cx, cy));
+        if (Math.Abs(_viewRotation) >= 0.001)
+            tg.Children.Add(new RotateTransform(_viewRotation, cx, cy));
+        dc.PushTransform(tg);
+    }
+
+    private void RestoreViewTransform(DrawingContext dc)
+    {
+        if (!_flipX && !_flipY && Math.Abs(_viewRotation) < 0.001) return;
+        dc.Pop();
+    }
+
+    private void RenderGrid(DrawingContext dc)
+    {
+        if (GridSettings == null || !GridSettings.ShowGrid) return;
+
+        var viewport = _frameViewportBounds ?? CalculateViewportBounds();
+        double spacingX = GridSettings.SpacingX, spacingY = GridSettings.SpacingY;
+        if (spacingX <= 0 || spacingY <= 0) return;
+        if (spacingX * _scale < 5 || spacingY * _scale < 5) return;
+
+        double startX = Math.Floor((viewport.Left  - GridSettings.OriginX) / spacingX) * spacingX + GridSettings.OriginX;
+        double startY = Math.Floor((viewport.Top   - GridSettings.OriginY) / spacingY) * spacingY + GridSettings.OriginY;
+        int lineCount = 0, maxLines = 200;
+
+        for (double x = startX; x <= viewport.Right && lineCount < maxLines; x += spacingX, lineCount++)
+        {
+            bool major = Math.Abs(x % (spacingX * 5)) < 0.0001;
+            dc.DrawLine(major ? GridPenMajor : GridPenMinor,
+                CadToScreen(x, viewport.Top), CadToScreen(x, viewport.Bottom));
+        }
+        for (double y = startY; y <= viewport.Bottom && lineCount < maxLines; y += spacingY, lineCount++)
+        {
+            bool major = Math.Abs(y % (spacingY * 5)) < 0.0001;
+            dc.DrawLine(major ? GridPenMajor : GridPenMinor,
+                CadToScreen(viewport.Left, y), CadToScreen(viewport.Right, y));
+        }
+    }
+
+    private void RenderDrawingPreview(DrawingContext dc)
+    {
+        if (_currentTool is FairwayTool)
+        {
+            RenderFairwayPreview(dc);
+            if (!_currentTool.IsDrawing) return;
+        }
+
+        if (_currentTool == null || !_currentTool.IsDrawing) return;
+
+        if (_currentTool is UnitNumberTool unitTool) { RenderUnitNumberPreview(dc, unitTool); return; }
+        if (_currentTool is FairwayTool) return;
+
+        var pts = _currentTool.GetPreviewPoints();
+        if (pts == null || pts.Count < 2) return;
+
+        var screen = pts.Select(p => CadToScreen(p.X, p.Y)).ToList();
+        for (int i = 0; i < screen.Count - 1; i++)
+            dc.DrawLine(PreviewPen, screen[i], screen[i + 1]);
+
+        if (_currentTool.IsPreviewClosed && screen.Count > 2)
+            dc.DrawLine(PreviewPen, screen[^1], screen[0]);
+
+        foreach (var pt in screen)
+            dc.DrawEllipse(Brushes.Cyan, null, pt, 4, 4);
+    }
+
+    private void RenderMarqueePreview(DrawingContext dc)
+    {
+        if (!_isMarqueeSelecting) return;
+
+        double x = Math.Min(_marqueeStartScreen.X, _marqueeCurrentScreen.X);
+        double y = Math.Min(_marqueeStartScreen.Y, _marqueeCurrentScreen.Y);
+        double w = Math.Abs(_marqueeCurrentScreen.X - _marqueeStartScreen.X);
+        double h = Math.Abs(_marqueeCurrentScreen.Y - _marqueeStartScreen.Y);
+        if (w < 1 && h < 1) return;
+
+        var rect = new Rect(x, y, w, h);
+        bool isWindow = _marqueeCurrentScreen.X >= _marqueeStartScreen.X;
+
+        if (isWindow)
+        {
+            var pen = new Pen(Brushes.Cyan, 1.0); pen.Freeze();
+            dc.DrawRectangle(null, pen, rect);
+        }
+        else
+        {
+            var pen = new Pen(Brushes.LimeGreen, 1.0) { DashStyle = DashStyles.Dash }; pen.Freeze();
+            var fill = new SolidColorBrush(WpfColor.FromArgb(30, 0, 255, 0)); fill.Freeze();
+            dc.DrawRectangle(fill, pen, rect);
+        }
     }
 
     /// <summary>
-    /// Sets the current drawing tool based on the drawing mode.
+    /// Reuses the overlay bitmap at a screen offset to show a 50%-opacity ghost of the
+    /// selected entities at their move destination. GPU-only: just two DrawImage calls.
     /// </summary>
+    private void RenderMovePreview(DrawingContext dc)
+    {
+        if (!_isMoving || _selectedHandlesSet.Count == 0 || _overlayBitmap == null) return;
+
+        var startScreen   = CadToScreen(_moveStartCadPoint.X, _moveStartCadPoint.Y);
+        var currentScreen = CadToScreen(_moveCurrentCadPoint.X, _moveCurrentCadPoint.Y);
+        double dx = currentScreen.X - startScreen.X;
+        double dy = currentScreen.Y - startScreen.Y;
+        if (Math.Abs(dx) < 0.5 && Math.Abs(dy) < 0.5) return;
+
+        int w = _overlayBitmap.PixelWidth, h = _overlayBitmap.PixelHeight;
+        dc.PushOpacity(0.5);
+        dc.DrawImage(_overlayBitmap, new Rect(dx, dy, w, h));
+        dc.Pop();
+    }
+
+    private void RenderFairwayPreview(DrawingContext dc)
+    {
+        if (_currentTool is not FairwayTool fairwayTool) return;
+
+        var pts = fairwayTool.GetPreviewPoints();
+        if (pts != null && pts.Count >= 2)
+            dc.DrawLine(PreviewPen, CadToScreen(pts[0].X, pts[0].Y), CadToScreen(pts[1].X, pts[1].Y));
+
+        var cursor = CadToScreen(_currentCadPoint.X, _currentCadPoint.Y);
+        double r = Math.Clamp(fairwayTool.NodeRadius * _scale, 4, 20);
+        dc.DrawEllipse(null, PreviewPen, cursor, r, r);
+
+        double cs = 8;
+        dc.DrawLine(PreviewPen, new WpfPoint(cursor.X - cs, cursor.Y), new WpfPoint(cursor.X + cs, cursor.Y));
+        dc.DrawLine(PreviewPen, new WpfPoint(cursor.X, cursor.Y - cs), new WpfPoint(cursor.X, cursor.Y + cs));
+    }
+
+    private void RenderUnitNumberPreview(DrawingContext dc, UnitNumberTool unitTool)
+    {
+        var pts = unitTool.GetPreviewPoints();
+        if (pts == null || pts.Count == 0) return;
+
+        string text = unitTool.CurrentText;
+        if (string.IsNullOrEmpty(text)) return;
+
+        double fontSize = Math.Max(unitTool.TextHeight * _scale, 4);
+        var screenPoint = CadToScreen(pts[0].X, pts[0].Y);
+
+        var ft = new FormattedText(text, System.Globalization.CultureInfo.InvariantCulture,
+            FlowDirection.LeftToRight, new Typeface("Arial"), fontSize, Brushes.Cyan, 1.0);
+
+        dc.PushOpacity(0.7);
+        dc.DrawText(ft, new WpfPoint(screenPoint.X, screenPoint.Y - ft.Height));
+        dc.Pop();
+
+        double cs = 6;
+        dc.DrawLine(PreviewPen, new WpfPoint(screenPoint.X - cs, screenPoint.Y), new WpfPoint(screenPoint.X + cs, screenPoint.Y));
+        dc.DrawLine(PreviewPen, new WpfPoint(screenPoint.X, screenPoint.Y - cs), new WpfPoint(screenPoint.X, screenPoint.Y + cs));
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private WpfPoint CadToScreen(double cadX, double cadY) =>
+        new WpfPoint((cadX + _offset.X) * _scale, (-cadY + _offset.Y) * _scale);
+
+    private bool SelectionMatchesCache()
+    {
+        if (_cachedSelectedHandles == null) return _selectedHandlesSet.Count == 0;
+        return _cachedSelectedHandles.SetEquals(_selectedHandlesSet);
+    }
+
+    private bool HiddenLayersMatchCache()
+    {
+        if (_cachedHiddenLayers == null) return _currentHiddenLayers.Count == 0;
+        return _cachedHiddenLayers.SetEquals(_currentHiddenLayers);
+    }
+
+    private bool HighlightMatchesCache()
+    {
+        var cur = HighlightedPathHandles;
+        if (_cachedHighlightHandles == null) return cur == null || cur.Count == 0;
+        if (cur == null) return _cachedHighlightHandles.Count == 0;
+        return _cachedHighlightHandles.SetEquals(cur);
+    }
+
+    private Rect CalculateViewportBounds()
+    {
+        var tl = ScreenToCad(new WpfPoint(0, 0));
+        var br = ScreenToCad(new WpfPoint(ActualWidth, ActualHeight));
+        return new Rect(
+            Math.Min(tl.X, br.X), Math.Min(tl.Y, br.Y),
+            Math.Abs(br.X - tl.X), Math.Abs(br.Y - tl.Y));
+    }
+
+    // ── Dependency property callbacks ────────────────────────────────────────
+
+    private static void OnEntitiesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas c) { c.CalculateExtents(); c.RebuildSpatialIndex(); c.InvalidateCache(); c.Render(); }
+    }
+
+    private static void OnSelectedHandlesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas c)
+        {
+            c._selectedHandlesSet = c.SelectedHandles?.ToHashSet() ?? new HashSet<ulong>();
+            c._overlayValid = false; // selection changed → overlay needs rebuild
+            c.Render();
+        }
+    }
+
+    private static void OnHiddenLayersChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas c)
+        {
+            c._currentHiddenLayers = c.HiddenLayers?.ToHashSet() ?? new HashSet<string>();
+            c.InvalidateCache();
+            c.Render();
+        }
+    }
+
+    private static void OnLockedLayersChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas c) c._lockedLayersSet = c.LockedLayers?.ToHashSet() ?? new HashSet<string>();
+    }
+
+    private static void OnLockedHandlesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas c) c._lockedHandlesSet = c.LockedHandles?.ToHashSet() ?? new HashSet<ulong>();
+    }
+
+    private static void OnExtentsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas c && e.NewValue is Extents ext) c._extents = ext;
+    }
+
+    private static void OnDrawingModeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas c) c.UpdateDrawingTool();
+    }
+
+    private static void OnGridSettingsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas c)
+        {
+            if (e.OldValue is GridSnapSettings old) old.PropertyChanged -= c.OnGridSettingsPropertyChanged;
+            if (e.NewValue is GridSnapSettings nw)  nw.PropertyChanged  += c.OnGridSettingsPropertyChanged;
+            c.Render();
+        }
+    }
+
+    private static void OnViewTransformChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is CadCanvas c)
+        {
+            c._flipX = c.FlipX; c._flipY = c.FlipY; c._viewRotation = c.ViewRotation;
+            c.InvalidateCache();
+            c.Render();
+        }
+    }
+
+    private void OnGridSettingsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        => Render();
+
+    // ── Drawing tool management ──────────────────────────────────────────────
+
     public void SetDrawingTool(IDrawingTool? tool)
     {
         if (_currentTool != null)
@@ -444,628 +814,14 @@ public class CadCanvas : FrameworkElement
             _currentTool.Cancelled -= OnDrawingToolCancelled;
             _currentTool.Reset();
         }
-
         _currentTool = tool;
-
         if (_currentTool != null)
         {
             _currentTool.Completed += OnDrawingToolCompleted;
             _currentTool.Cancelled += OnDrawingToolCancelled;
         }
-
         UpdateCursor();
-        Render();
-    }
-
-    /// <summary>
-    /// Gets the snapped CAD point based on current grid settings.
-    /// </summary>
-    public WpfPoint GetSnappedCadPoint(WpfPoint screenPoint)
-    {
-        var cadPoint = ScreenToCad(screenPoint);
-
-        if (GridSettings != null && GridSettings.IsEnabled)
-        {
-            var snapped = SnapHelper.SnapToGrid(cadPoint, GridSettings);
-            return snapped;
-        }
-
-        return cadPoint;
-    }
-
-    /// <summary>
-    /// Forces a full re-render, invalidating any cached bitmap.
-    /// </summary>
-    public void InvalidateCache()
-    {
-        _cacheValid = false;
-        _cachedBitmap = null;
-    }
-
-    private void RenderWithCache(bool forceFullRender)
-    {
-        using var dc = _drawingVisual.RenderOpen();
-
-        dc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, ActualWidth, ActualHeight));
-
-        var entities = Entities;
-        if (entities == null || ActualWidth <= 0 || ActualHeight <= 0)
-            return;
-
-        // Cache viewport bounds for this frame to avoid recalculating multiple times
-        _frameViewportBounds = CalculateViewportBounds();
-
-        int width = (int)ActualWidth;
-        int height = (int)ActualHeight;
-
-        // Apply view transforms (flip and rotation)
-        ApplyViewTransform(dc, width, height);
-
-        // Check if we need to invalidate the cache
-        bool scaleChanged = Math.Abs(_scale - _cachedScale) > 0.0001;
-        bool sizeChanged = width != _cachedWidth || height != _cachedHeight;
-        bool selectionChanged = !SelectionMatchesCache();
-        bool layersChanged = !HiddenLayersMatchCache();
-
-        // During panning with valid cache, use fast bitmap offset rendering
-        if (_isPanning && _cacheValid && !scaleChanged && !sizeChanged && !forceFullRender)
-        {
-            RenderFromCacheWithOffset(dc, width, height);
-            RestoreViewTransform(dc);
-            return;
-        }
-
-        // If only selection changed, we can render cache + selection overlay
-        if (_cacheValid && !scaleChanged && !sizeChanged && !layersChanged && selectionChanged && !forceFullRender)
-        {
-            RenderCacheWithSelectionOverlay(dc, entities, width, height);
-            RestoreViewTransform(dc);
-            return;
-        }
-
-        // Full render required - rebuild the cache
-        if (!_cacheValid || scaleChanged || sizeChanged || layersChanged || forceFullRender)
-        {
-            RebuildCache(entities, width, height);
-        }
-
-        // Draw from cache
-        if (_cachedBitmap != null)
-        {
-            dc.DrawImage(_cachedBitmap, new Rect(0, 0, width, height));
-        }
-
-        // Draw selection overlay
-        RenderSelectionOverlay(dc, entities);
-
-        // Draw path highlight overlay
-        RenderPathHighlight(dc, entities);
-
-        // Draw grid (on top of entities but below preview)
-        RenderGrid(dc);
-
-        // Draw drawing preview
-        RenderDrawingPreview(dc);
-
-        // Draw marquee selection rectangle
-        RenderMarqueePreview(dc);
-
-        // Draw move preview (ghost of selected entities)
-        RenderMovePreview(dc, entities);
-
-        RestoreViewTransform(dc);
-    }
-
-    private void ApplyViewTransform(DrawingContext dc, int width, int height)
-    {
-        if (!_flipX && !_flipY && Math.Abs(_viewRotation) < 0.001)
-            return;
-
-        double centerX = width / 2.0;
-        double centerY = height / 2.0;
-
-        var transformGroup = new TransformGroup();
-
-        // Apply flip transforms using ScaleTransform with center point
-        if (_flipX || _flipY)
-        {
-            double scaleX = _flipX ? -1 : 1;
-            double scaleY = _flipY ? -1 : 1;
-            transformGroup.Children.Add(new ScaleTransform(scaleX, scaleY, centerX, centerY));
-        }
-
-        // Apply rotation around center
-        if (Math.Abs(_viewRotation) >= 0.001)
-        {
-            transformGroup.Children.Add(new RotateTransform(_viewRotation, centerX, centerY));
-        }
-
-        dc.PushTransform(transformGroup);
-    }
-
-    private void RestoreViewTransform(DrawingContext dc)
-    {
-        if (!_flipX && !_flipY && Math.Abs(_viewRotation) < 0.001)
-            return;
-
-        dc.Pop();
-    }
-
-    private void RenderGrid(DrawingContext dc)
-    {
-        if (GridSettings == null || !GridSettings.ShowGrid)
-            return;
-
-        var viewport = _frameViewportBounds ?? CalculateViewportBounds();
-        double spacingX = GridSettings.SpacingX;
-        double spacingY = GridSettings.SpacingY;
-
-        if (spacingX <= 0 || spacingY <= 0)
-            return;
-
-        // Don't render grid if spacing is too small on screen
-        double screenSpacingX = spacingX * _scale;
-        double screenSpacingY = spacingY * _scale;
-
-        if (screenSpacingX < 5 || screenSpacingY < 5)
-            return;
-
-        // Calculate grid line range
-        double startX = Math.Floor((viewport.Left - GridSettings.OriginX) / spacingX) * spacingX + GridSettings.OriginX;
-        double endX = viewport.Right;
-        double startY = Math.Floor((viewport.Top - GridSettings.OriginY) / spacingY) * spacingY + GridSettings.OriginY;
-        double endY = viewport.Bottom;
-
-        // Limit number of grid lines for performance
-        int maxLines = 200;
-        int lineCount = 0;
-
-        // Draw vertical lines
-        for (double x = startX; x <= endX && lineCount < maxLines; x += spacingX)
-        {
-            var screenStart = CadToScreen(x, viewport.Top);
-            var screenEnd = CadToScreen(x, viewport.Bottom);
-
-            bool isMajor = Math.Abs(x % (spacingX * 5)) < 0.0001;
-            dc.DrawLine(isMajor ? GridPenMajor : GridPenMinor, screenStart, screenEnd);
-            lineCount++;
-        }
-
-        // Draw horizontal lines
-        for (double y = startY; y <= endY && lineCount < maxLines; y += spacingY)
-        {
-            var screenStart = CadToScreen(viewport.Left, y);
-            var screenEnd = CadToScreen(viewport.Right, y);
-
-            bool isMajor = Math.Abs(y % (spacingY * 5)) < 0.0001;
-            dc.DrawLine(isMajor ? GridPenMajor : GridPenMinor, screenStart, screenEnd);
-            lineCount++;
-        }
-    }
-
-    private void RenderDrawingPreview(DrawingContext dc)
-    {
-        // Fairway tool always shows preview (even when not IsDrawing, for the cursor circle)
-        if (_currentTool is FairwayTool)
-        {
-            RenderFairwayPreview(dc);
-            if (!_currentTool.IsDrawing)
-                return;
-        }
-
-        if (_currentTool == null || !_currentTool.IsDrawing)
-            return;
-
-        // Special preview for unit number tool
-        if (_currentTool is UnitNumberTool unitTool)
-        {
-            RenderUnitNumberPreview(dc, unitTool);
-            return;
-        }
-
-        // FairwayTool preview is handled above
-        if (_currentTool is FairwayTool)
-            return;
-
-        var previewPoints = _currentTool.GetPreviewPoints();
-        if (previewPoints == null || previewPoints.Count < 2)
-            return;
-
-        // Convert CAD points to screen points
-        var screenPoints = previewPoints.Select(p => CadToScreen(p.X, p.Y)).ToList();
-
-        // Draw preview lines
-        for (int i = 0; i < screenPoints.Count - 1; i++)
-        {
-            dc.DrawLine(PreviewPen, screenPoints[i], screenPoints[i + 1]);
-        }
-
-        // Close the shape if it's a polygon preview
-        if (_currentTool.IsPreviewClosed && screenPoints.Count > 2)
-        {
-            dc.DrawLine(PreviewPen, screenPoints[^1], screenPoints[0]);
-        }
-
-        // Draw points
-        var pointBrush = Brushes.Cyan;
-        foreach (var point in screenPoints)
-        {
-            dc.DrawEllipse(pointBrush, null, point, 4, 4);
-        }
-    }
-
-    private void RenderMarqueePreview(DrawingContext dc)
-    {
-        if (!_isMarqueeSelecting)
-            return;
-
-        double x = Math.Min(_marqueeStartScreen.X, _marqueeCurrentScreen.X);
-        double y = Math.Min(_marqueeStartScreen.Y, _marqueeCurrentScreen.Y);
-        double w = Math.Abs(_marqueeCurrentScreen.X - _marqueeStartScreen.X);
-        double h = Math.Abs(_marqueeCurrentScreen.Y - _marqueeStartScreen.Y);
-
-        if (w < 1 && h < 1)
-            return;
-
-        var rect = new Rect(x, y, w, h);
-
-        // Left-to-right = window (solid cyan), right-to-left = crossing (dashed green with fill)
-        bool isWindow = _marqueeCurrentScreen.X >= _marqueeStartScreen.X;
-
-        if (isWindow)
-        {
-            var pen = new Pen(Brushes.Cyan, 1.0);
-            pen.Freeze();
-            dc.DrawRectangle(null, pen, rect);
-        }
-        else
-        {
-            var pen = new Pen(Brushes.LimeGreen, 1.0) { DashStyle = DashStyles.Dash };
-            pen.Freeze();
-            var fill = new SolidColorBrush(Color.FromArgb(30, 0, 255, 0));
-            fill.Freeze();
-            dc.DrawRectangle(fill, pen, rect);
-        }
-    }
-
-    private void RenderMovePreview(DrawingContext dc, IEnumerable<Entity> entities)
-    {
-        if (!_isMoving || _selectedHandlesSet.Count == 0)
-            return;
-
-        // Calculate screen-space delta
-        var startScreen = CadToScreen(_moveStartCadPoint.X, _moveStartCadPoint.Y);
-        var currentScreen = CadToScreen(_moveCurrentCadPoint.X, _moveCurrentCadPoint.Y);
-        double screenDx = currentScreen.X - startScreen.X;
-        double screenDy = currentScreen.Y - startScreen.Y;
-
-        if (Math.Abs(screenDx) < 0.5 && Math.Abs(screenDy) < 0.5)
-            return;
-
-        // Render selected entities translated as a ghost
-        dc.PushTransform(new TranslateTransform(screenDx, screenDy));
-        dc.PushOpacity(0.5);
-
-        var renderContext = new RenderContext
-        {
-            Scale = _scale,
-            Offset = _offset,
-            DefaultColor = Colors.Cyan,
-            LineThickness = 1.0,
-            ShowSelection = false,
-            ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds()
-        };
-
-        if (_entityByHandle != null)
-        {
-            var selectedEntities = new List<Entity>(_selectedHandlesSet.Count);
-            foreach (var handle in _selectedHandlesSet)
-            {
-                if (_entityByHandle.TryGetValue(handle, out var entity))
-                    selectedEntities.Add(entity);
-            }
-            _renderService.RenderEntities(dc, selectedEntities, renderContext);
-        }
-
-        dc.Pop(); // opacity
-        dc.Pop(); // transform
-    }
-
-    private WpfPoint CadToScreen(double cadX, double cadY)
-    {
-        return new WpfPoint(
-            (cadX + _offset.X) * _scale,
-            (-cadY + _offset.Y) * _scale
-        );
-    }
-
-    private bool SelectionMatchesCache()
-    {
-        if (_cachedSelectedHandles == null)
-            return _selectedHandlesSet.Count == 0;
-        return _cachedSelectedHandles.SetEquals(_selectedHandlesSet);
-    }
-
-    private bool HiddenLayersMatchCache()
-    {
-        var currentLayers = HiddenLayers?.ToHashSet() ?? new HashSet<string>();
-        if (_cachedHiddenLayers == null)
-            return currentLayers.Count == 0;
-        return _cachedHiddenLayers.SetEquals(currentLayers);
-    }
-
-    private void RebuildCache(IEnumerable<Entity> entities, int width, int height)
-    {
-        // Create a new bitmap for caching
-        var dpi = VisualTreeHelper.GetDpi(this);
-        _cachedBitmap = new RenderTargetBitmap(
-            (int)(width * dpi.DpiScaleX),
-            (int)(height * dpi.DpiScaleY),
-            dpi.PixelsPerInchX,
-            dpi.PixelsPerInchY,
-            PixelFormats.Pbgra32);
-
-        var cacheVisual = new DrawingVisual();
-        using (var cacheDc = cacheVisual.RenderOpen())
-        {
-            // Draw background
-            cacheDc.DrawRectangle(Brushes.Black, null, new Rect(0, 0, width, height));
-
-            // Create render context WITHOUT selection (cache unselected entities)
-            var renderContext = new RenderContext
-            {
-                Scale = _scale,
-                Offset = _offset,
-                DefaultColor = Colors.White,
-                LineThickness = 1.0,
-                ShowSelection = false, // Don't show selection in cache
-                ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds()
-            };
-
-            if (HiddenLayers != null)
-            {
-                foreach (var layer in HiddenLayers)
-                {
-                    renderContext.HiddenLayers.Add(layer);
-                }
-            }
-
-            _renderService.RenderEntities(cacheDc, entities, renderContext);
-        }
-
-        _cachedBitmap.Render(cacheVisual);
-        _cachedBitmap.Freeze(); // Freeze for performance
-
-        // Update cache metadata
-        _cachedScale = _scale;
-        _cachedOffset = _offset;
-        _cachedWidth = width;
-        _cachedHeight = height;
-        _cachedHiddenLayers = HiddenLayers?.ToHashSet() ?? new HashSet<string>();
-        _cachedSelectedHandles = new HashSet<ulong>(_selectedHandlesSet);
-        _cacheValid = true;
-    }
-
-    private void RenderFromCacheWithOffset(DrawingContext dc, int width, int height)
-    {
-        if (_cachedBitmap == null)
-            return;
-
-        // Calculate the pixel offset from cached position
-        double deltaX = (_offset.X - _cachedOffset.X) * _scale;
-        double deltaY = (_offset.Y - _cachedOffset.Y) * _scale;
-
-        // Draw the cached bitmap with offset
-        dc.DrawImage(_cachedBitmap, new Rect(deltaX, deltaY, width, height));
-
-        // Draw selection overlay at current position
-        var entities = Entities;
-        if (entities != null)
-        {
-            RenderSelectionOverlay(dc, entities);
-        }
-    }
-
-    private void RenderCacheWithSelectionOverlay(DrawingContext dc, IEnumerable<Entity> entities, int width, int height)
-    {
-        // Draw cached bitmap
-        if (_cachedBitmap != null)
-        {
-            dc.DrawImage(_cachedBitmap, new Rect(0, 0, width, height));
-        }
-
-        // Draw selection overlay
-        RenderSelectionOverlay(dc, entities);
-
-        // Update cached selection
-        _cachedSelectedHandles = new HashSet<ulong>(_selectedHandlesSet);
-    }
-
-    private void RenderSelectionOverlay(DrawingContext dc, IEnumerable<Entity> entities)
-    {
-        if (_selectedHandlesSet.Count == 0)
-            return;
-
-        var renderContext = new RenderContext
-        {
-            Scale = _scale,
-            Offset = _offset,
-            DefaultColor = Colors.White,
-            LineThickness = 1.0,
-            ShowSelection = true,
-            ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds()
-        };
-
-        foreach (var handle in _selectedHandlesSet)
-        {
-            renderContext.SelectedHandles.Add(handle);
-        }
-
-        if (HiddenLayers != null)
-        {
-            foreach (var layer in HiddenLayers)
-            {
-                renderContext.HiddenLayers.Add(layer);
-            }
-        }
-
-        // Use handle->entity dictionary for O(1) lookup per selected handle
-        if (_entityByHandle != null)
-        {
-            var selectedEntities = new List<Entity>(_selectedHandlesSet.Count);
-            foreach (var handle in _selectedHandlesSet)
-            {
-                if (_entityByHandle.TryGetValue(handle, out var entity))
-                    selectedEntities.Add(entity);
-            }
-            _renderService.RenderEntities(dc, selectedEntities, renderContext);
-        }
-        else
-        {
-            // Fallback: linear scan
-            var selectedEntities = entities.Where(e => _selectedHandlesSet.Contains(e.Handle));
-            _renderService.RenderEntities(dc, selectedEntities, renderContext);
-        }
-    }
-
-    /// <summary>
-    /// Gets the current viewport bounds in CAD coordinates.
-    /// </summary>
-    public Rect GetViewportBounds()
-    {
-        return CalculateViewportBounds();
-    }
-
-    private Rect CalculateViewportBounds()
-    {
-        // Convert screen corners to CAD coordinates
-        var topLeft = ScreenToCad(new WpfPoint(0, 0));
-        var bottomRight = ScreenToCad(new WpfPoint(ActualWidth, ActualHeight));
-
-        double minX = Math.Min(topLeft.X, bottomRight.X);
-        double maxX = Math.Max(topLeft.X, bottomRight.X);
-        double minY = Math.Min(topLeft.Y, bottomRight.Y);
-        double maxY = Math.Max(topLeft.Y, bottomRight.Y);
-
-        return new Rect(minX, minY, maxX - minX, maxY - minY);
-    }
-
-    protected override int VisualChildrenCount => _visuals.Count;
-
-    protected override Visual GetVisualChild(int index) => _visuals[index];
-
-    protected override void OnRender(DrawingContext drawingContext)
-    {
-        base.OnRender(drawingContext);
-        drawingContext.DrawRectangle(Brushes.Black, null, new Rect(RenderSize));
-    }
-
-    private static void OnEntitiesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is CadCanvas canvas)
-        {
-            canvas.CalculateExtents();
-            canvas.RebuildSpatialIndex();
-            canvas.InvalidateCache(); // Entities changed - full cache rebuild needed
-            canvas.Render();
-        }
-    }
-
-    private static void OnSelectedHandlesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is CadCanvas canvas)
-        {
-            // Rebuild the cached selected handles hashset
-            canvas._selectedHandlesSet = canvas.SelectedHandles?.ToHashSet() ?? new HashSet<ulong>();
-            // Selection changes don't invalidate cache - we render selection as overlay
-            canvas.Render();
-        }
-    }
-
-    private static void OnHiddenLayersChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is CadCanvas canvas)
-        {
-            canvas.InvalidateCache(); // Layer visibility changed - full cache rebuild needed
-            canvas.Render();
-        }
-    }
-
-    private static void OnLockedLayersChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is CadCanvas canvas)
-        {
-            canvas._lockedLayersSet = canvas.LockedLayers?.ToHashSet() ?? new HashSet<string>();
-        }
-    }
-
-    private static void OnLockedHandlesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is CadCanvas canvas)
-        {
-            canvas._lockedHandlesSet = canvas.LockedHandles?.ToHashSet() ?? new HashSet<ulong>();
-        }
-    }
-
-    private bool IsEntityLocked(Entity entity)
-    {
-        return _lockedHandlesSet.Contains(entity.Handle) ||
-               (entity.Layer != null && _lockedLayersSet.Contains(entity.Layer.Name));
-    }
-
-    private static bool IsWalkwayEdge(Entity entity)
-    {
-        return entity is Line && entity.Layer?.Name == Models.CadDocumentModel.WalkwaysLayerName;
-    }
-
-    private static void OnExtentsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is CadCanvas canvas && e.NewValue is Extents extents)
-        {
-            canvas._extents = extents;
-        }
-    }
-
-    private static void OnDrawingModeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is CadCanvas canvas)
-        {
-            canvas.UpdateDrawingTool();
-        }
-    }
-
-    private static void OnGridSettingsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is CadCanvas canvas)
-        {
-            if (e.OldValue is GridSnapSettings oldSettings)
-            {
-                oldSettings.PropertyChanged -= canvas.OnGridSettingsPropertyChanged;
-            }
-
-            if (e.NewValue is GridSnapSettings newSettings)
-            {
-                newSettings.PropertyChanged += canvas.OnGridSettingsPropertyChanged;
-            }
-
-            canvas.Render();
-        }
-    }
-
-    private static void OnViewTransformChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is CadCanvas canvas)
-        {
-            canvas._flipX = canvas.FlipX;
-            canvas._flipY = canvas.FlipY;
-            canvas._viewRotation = canvas.ViewRotation;
-            canvas.InvalidateCache();
-            canvas.Render();
-        }
-    }
-
-    private void OnGridSettingsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
+        UpdatePreviewVisual();
         Render();
     }
 
@@ -1073,34 +829,28 @@ public class CadCanvas : FrameworkElement
     {
         IDrawingTool? tool = DrawingMode switch
         {
-            DrawingMode.DrawLine => new LineTool(),
-            DrawingMode.DrawPolyline => new PolylineTool(),
-            DrawingMode.DrawPolygon => new PolygonTool(),
-            DrawingMode.ZoomToArea => new ZoomAreaTool(),
+            DrawingMode.DrawLine       => new LineTool(),
+            DrawingMode.DrawPolyline   => new PolylineTool(),
+            DrawingMode.DrawPolygon    => new PolygonTool(),
+            DrawingMode.ZoomToArea     => new ZoomAreaTool(),
             DrawingMode.PlaceUnitNumber => new UnitNumberTool(),
-            DrawingMode.DrawFairway => new FairwayTool(),
+            DrawingMode.DrawFairway    => new FairwayTool(),
             _ => null
         };
-
         SetDrawingTool(tool);
     }
 
     private void OnDrawingToolCompleted(object? sender, DrawingCompletedEventArgs e)
     {
         DrawingCompleted?.Invoke(this, e);
-
-        // FairwayTool fires Completed per-click (not once at end),
-        // so don't reset it — it manages its own state via EndSegment/Reset.
-        if (_currentTool is not FairwayTool)
-        {
-            _currentTool?.Reset();
-        }
-
+        if (_currentTool is not FairwayTool) _currentTool?.Reset();
+        UpdatePreviewVisual();
         Render();
     }
 
     private void OnDrawingToolCancelled(object? sender, EventArgs e)
     {
+        UpdatePreviewVisual();
         Render();
     }
 
@@ -1109,282 +859,170 @@ public class CadCanvas : FrameworkElement
         Cursor = DrawingMode switch
         {
             DrawingMode.Pan => Cursors.Hand,
-            DrawingMode.DrawLine or DrawingMode.DrawPolyline or DrawingMode.DrawPolygon or DrawingMode.ZoomToArea or DrawingMode.PlaceUnitNumber or DrawingMode.DrawFairway => Cursors.Cross,
+            DrawingMode.DrawLine or DrawingMode.DrawPolyline or DrawingMode.DrawPolygon
+                or DrawingMode.ZoomToArea or DrawingMode.PlaceUnitNumber or DrawingMode.DrawFairway
+                => Cursors.Cross,
             _ => Cursors.Arrow
         };
     }
 
+    public void ConfigureUnitNumberTool(string prefix, int nextNumber, string format, double textHeight)
+    {
+        if (_currentTool is UnitNumberTool t)
+        {
+            t.Prefix = prefix; t.NextNumber = nextNumber;
+            t.FormatString = format; t.TextHeight = textHeight;
+            Render();
+        }
+    }
+
+    public void ConfigureFairwayTool(List<(ulong handle, double x, double y)> existingNodes,
+        double snapDistance = 5.0, double nodeRadius = 2.0)
+    {
+        if (_currentTool is FairwayTool ft)
+        {
+            ft.SetExistingNodes(existingNodes);
+            ft.SnapDistance = snapDistance;
+            ft.NodeRadius = nodeRadius;
+        }
+    }
+
+    // ── Spatial index ────────────────────────────────────────────────────────
+
     private void CalculateExtents()
     {
         var entities = Entities;
-        if (entities == null)
-        {
-            _extents = null;
-            return;
-        }
-
+        if (entities == null) { _extents = null; return; }
         _extents = new Extents();
-        foreach (var entity in entities)
-        {
-            _extents.Expand(entity);
-        }
+        foreach (var e in entities) _extents.Expand(e);
     }
 
     public void RebuildSpatialIndex()
     {
         var entities = Entities;
-        if (entities == null)
-        {
-            _spatialGrid = null;
-            _entityByHandle = null;
-            return;
-        }
+        if (entities == null) { _spatialGrid = null; _entityByHandle = null; return; }
 
-        var entityList = entities.ToList();
+        var list = entities.ToList();
+        _entityByHandle = new Dictionary<ulong, Entity>(list.Count);
+        foreach (var e in list) _entityByHandle[e.Handle] = e;
 
-        // Build handle -> entity dictionary
-        _entityByHandle = new Dictionary<ulong, Entity>(entityList.Count);
-        foreach (var entity in entityList)
-        {
-            _entityByHandle[entity.Handle] = entity;
-        }
-
-        // Compute grid extents from BoundingBoxHelper (same source as spatial grid insertion)
         double minX = double.MaxValue, minY = double.MaxValue;
         double maxX = double.MinValue, maxY = double.MinValue;
         bool hasBounds = false;
 
-        foreach (var entity in entityList)
+        foreach (var e in list)
         {
-            var bounds = BoundingBoxHelper.GetBounds(entity);
-            if (bounds.HasValue)
-            {
-                hasBounds = true;
-                minX = Math.Min(minX, bounds.Value.Left);
-                minY = Math.Min(minY, bounds.Value.Top);
-                maxX = Math.Max(maxX, bounds.Value.Right);
-                maxY = Math.Max(maxY, bounds.Value.Bottom);
-            }
+            var b = BoundingBoxHelper.GetBounds(e);
+            if (!b.HasValue) continue;
+            hasBounds = true;
+            minX = Math.Min(minX, b.Value.Left);  minY = Math.Min(minY, b.Value.Top);
+            maxX = Math.Max(maxX, b.Value.Right); maxY = Math.Max(maxY, b.Value.Bottom);
         }
 
-        if (hasBounds && maxX > minX && maxY > minY)
-        {
-            var rect = new Rect(minX, minY, maxX - minX, maxY - minY);
-            _spatialGrid = SpatialGrid.Build(entityList, rect);
-        }
-        else
-        {
-            _spatialGrid = null;
-        }
+        _spatialGrid = hasBounds && maxX > minX && maxY > minY
+            ? SpatialGrid.Build(list, new Rect(minX, minY, maxX - minX, maxY - minY))
+            : null;
     }
+
+    // ── Input handlers ───────────────────────────────────────────────────────
 
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape)
         {
-            if (_isMarqueeSelecting)
-            {
-                _isMarqueeSelecting = false;
-                ReleaseMouseCapture();
-                Render();
-                e.Handled = true;
-                return;
-            }
-
-            if (_isMoving)
-            {
-                _isMoving = false;
-                ReleaseMouseCapture();
-                Render();
-                e.Handled = true;
-                return;
-            }
+            if (_isMarqueeSelecting) { _isMarqueeSelecting = false; ReleaseMouseCapture(); UpdatePreviewVisual(); Render(); e.Handled = true; return; }
+            if (_isMoving)           { _isMoving = false;           ReleaseMouseCapture(); UpdatePreviewVisual(); Render(); e.Handled = true; return; }
         }
-
-        if (_currentTool != null)
-        {
-            _currentTool.OnKeyDown(e.Key);
-            Render();
-            e.Handled = true;
-        }
+        if (_currentTool != null) { _currentTool.OnKeyDown(e.Key); UpdatePreviewVisual(); Render(); e.Handled = true; }
     }
 
     private void OnMouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        double factor = e.Delta > 0 ? 1.1 : 1.0 / 1.1;
-        WpfPoint mousePos = e.GetPosition(this);
-        ZoomAtPoint(mousePos, factor);
-    }
+        => ZoomAtPoint(e.GetPosition(this), e.Delta > 0 ? 1.1 : 1.0 / 1.1);
 
     private void ZoomAtPoint(WpfPoint screenPoint, double factor)
     {
-        var cadPoint = ScreenToCad(screenPoint);
-
-        _scale *= factor;
-        _scale = Math.Max(0.001, Math.Min(1000, _scale));
-
-        _offset = new WpfPoint(
-            screenPoint.X / _scale - cadPoint.X,
-            screenPoint.Y / _scale + cadPoint.Y
-        );
-
-        // Scale changed - cache will be automatically invalidated in RenderWithCache
+        var cad = ScreenToCad(screenPoint);
+        _scale = Math.Max(0.001, Math.Min(1000, _scale * factor));
+        _offset = new WpfPoint(screenPoint.X / _scale - cad.X, screenPoint.Y / _scale + cad.Y);
+        // Invalidate so the cache is rebuilt at the new scale.
+        // With InvalidateVisual() coalescing, rapid scroll events trigger only one rebuild.
+        InvalidateCache();
         Render();
     }
 
     private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         Focus();
-
-        // Handle double-click for editing unit numbers in Select mode
-        if (e.ClickCount == 2 && DrawingMode == DrawingMode.Select)
-        {
-            HandleDoubleClick(e);
-            // Don't return - let the normal click handling proceed for selection
-        }
+        if (e.ClickCount == 2 && DrawingMode == DrawingMode.Select) HandleDoubleClick(e);
 
         var screenPoint = e.GetPosition(this);
 
-        // Handle drawing mode - use snapped point for precise drawing
         if (_currentTool != null && DrawingMode != DrawingMode.Select && DrawingMode != DrawingMode.Pan)
         {
-            var snappedPoint = GetSnappedCadPoint(screenPoint);
-            _currentTool.OnMouseDown(snappedPoint, MouseButton.Left);
-            Render();
-            return;
+            _currentTool.OnMouseDown(GetSnappedCadPoint(screenPoint), MouseButton.Left);
+            Render(); return;
         }
 
-        if (IsPanMode || DrawingMode == DrawingMode.Pan)
-        {
-            StartPan(screenPoint);
-            return;
-        }
+        if (IsPanMode || DrawingMode == DrawingMode.Pan) { StartPan(screenPoint); return; }
 
-        // Selection mode - use raw (unsnapped) point for accurate hit testing
         var cadPoint = ScreenToCad(screenPoint);
+        var entities = Entities; if (entities == null) return;
 
-        var entities = Entities;
-        if (entities == null)
-            return;
+        double tol = 5.0 / _scale;
+        Entity? hit = null;
 
-        double tolerance = 5.0 / _scale;
-
-        // Use spatial grid for fast hit testing when available
-        Entity? hitEntity = null;
         if (_spatialGrid != null)
         {
-            var candidates = _spatialGrid.Query(cadPoint, tolerance);
-            foreach (var entity in candidates)
-            {
-                if (HitTestHelper.HitTest(entity, cadPoint, tolerance) && !IsEntityLocked(entity) && !IsWalkwayEdge(entity))
-                {
-                    hitEntity = entity;
-                    break;
-                }
-            }
+            foreach (var ent in _spatialGrid.Query(cadPoint, tol))
+                if (HitTestHelper.HitTest(ent, cadPoint, tol) && !IsEntityLocked(ent) && !IsWalkwayEdge(ent))
+                { hit = ent; break; }
         }
         else
         {
-            // Fallback: linear scan
-            foreach (var entity in entities)
-            {
-                if (HitTestHelper.HitTest(entity, cadPoint, tolerance) && !IsEntityLocked(entity) && !IsWalkwayEdge(entity))
-                {
-                    hitEntity = entity;
-                    break;
-                }
-            }
+            foreach (var ent in entities)
+                if (HitTestHelper.HitTest(ent, cadPoint, tol) && !IsEntityLocked(ent) && !IsWalkwayEdge(ent))
+                { hit = ent; break; }
         }
 
-        bool addToSelection = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+        bool addToSel = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
 
-        if (hitEntity != null && _selectedHandlesSet.Contains(hitEntity.Handle))
+        if (hit != null && _selectedHandlesSet.Contains(hit.Handle))
         {
-            // Hit on already-selected entity → start move drag
-            _isMoving = true;
-            _moveStartCadPoint = cadPoint;
-            _moveCurrentCadPoint = cadPoint;
-            CaptureMouse();
+            _isMoving = true; _moveStartCadPoint = cadPoint; _moveCurrentCadPoint = cadPoint; CaptureMouse();
         }
-        else if (hitEntity != null)
-        {
-            // Hit on unselected entity → select it (existing behavior)
-            EntityClicked?.Invoke(this, new CadEntityClickEventArgs(hitEntity, addToSelection));
-        }
-        else
-        {
-            // No hit → start marquee selection (or clear selection if no drag)
-            if (!addToSelection)
-            {
-                // Immediately fire click with null entity to clear selection
-                // (will be overridden by marquee if user drags)
-            }
-            _isMarqueeSelecting = true;
-            _marqueeStartScreen = screenPoint;
-            _marqueeCurrentScreen = screenPoint;
-            CaptureMouse();
-        }
+        else if (hit != null) EntityClicked?.Invoke(this, new CadEntityClickEventArgs(hit, addToSel));
+        else { _isMarqueeSelecting = true; _marqueeStartScreen = screenPoint; _marqueeCurrentScreen = screenPoint; CaptureMouse(); }
     }
 
     private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (_isPanning && IsPanMode)
-        {
-            EndPan();
-            return;
-        }
+        if (_isPanning && IsPanMode) { EndPan(); return; }
 
-        // Forward to drawing tool (e.g. ZoomAreaTool uses mouse up to complete)
         if (_currentTool != null && _currentTool.IsDrawing)
         {
-            var screenPoint = e.GetPosition(this);
-            var cadPoint = GetSnappedCadPoint(screenPoint);
-            _currentTool.OnMouseUp(cadPoint, MouseButton.Left);
-            Render();
-            return;
+            _currentTool.OnMouseUp(GetSnappedCadPoint(e.GetPosition(this)), MouseButton.Left);
+            Render(); return;
         }
 
-        if (_isMarqueeSelecting)
-        {
-            CompleteMarqueeSelection(e);
-            return;
-        }
-
-        if (_isMoving)
-        {
-            CompleteMoveOperation(e);
-            return;
-        }
+        if (_isMarqueeSelecting) { CompleteMarqueeSelection(e); return; }
+        if (_isMoving)           { CompleteMoveOperation(e); }
     }
 
     private void OnMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
         var screenPoint = e.GetPosition(this);
-        var cadPoint = GetSnappedCadPoint(screenPoint);
-
-        // If drawing, right-click can complete or cancel
         if (_currentTool != null && _currentTool.IsDrawing)
         {
-            _currentTool.OnMouseDown(cadPoint, MouseButton.Right);
-            Render();
-            return;
+            _currentTool.OnMouseDown(GetSnappedCadPoint(screenPoint), MouseButton.Right);
+            Render(); return;
         }
-
-        // Check for walkway context menu in select mode
-        if (DrawingMode == DrawingMode.Select && HandleRightClickContextMenu(screenPoint))
-        {
-            return;
-        }
-
+        if (DrawingMode == DrawingMode.Select && HandleRightClickContextMenu(screenPoint)) return;
         StartPan(screenPoint);
     }
 
     private void OnMouseRightButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (_isPanning)
-        {
-            EndPan();
-        }
+        if (_isPanning) EndPan();
     }
 
     private void OnMouseMove(object sender, MouseEventArgs e)
@@ -1392,121 +1030,63 @@ public class CadCanvas : FrameworkElement
         var screenPoint = e.GetPosition(this);
         var cadPoint = GetSnappedCadPoint(screenPoint);
         _currentCadPoint = cadPoint;
-
         CadMouseMove?.Invoke(this, new CadMouseEventArgs(cadPoint.X, cadPoint.Y));
 
-        // Update drawing tool preview
         if (_currentTool != null && (_currentTool.IsDrawing || _currentTool is FairwayTool))
         {
             _currentTool.OnMouseMove(cadPoint);
-            Render();
+            UpdatePreviewVisual(); // synchronous — zero vsync latency
         }
 
         if (_isPanning)
         {
-            var currentPos = screenPoint;
-            var delta = new WpfPoint(
-                (currentPos.X - _panStart.X) / _scale,
-                (currentPos.Y - _panStart.Y) / _scale
-            );
-
-            _offset = new WpfPoint(_offset.X + delta.X, _offset.Y + delta.Y);
-            _panStart = currentPos;
-
-            Render();
+            _offset = new WpfPoint(
+                _offset.X + (screenPoint.X - _panStart.X) / _scale,
+                _offset.Y + (screenPoint.Y - _panStart.Y) / _scale);
+            _panStart = screenPoint;
+            Render(); // entity layer (fast pan path — bitmap blit only)
         }
 
-        if (_isMarqueeSelecting)
-        {
-            _marqueeCurrentScreen = screenPoint;
-            Render();
-        }
-
-        if (_isMoving)
-        {
-            _moveCurrentCadPoint = ScreenToCad(screenPoint);
-            Render();
-        }
+        if (_isMarqueeSelecting) { _marqueeCurrentScreen = screenPoint; UpdatePreviewVisual(); }
+        if (_isMoving)           { _moveCurrentCadPoint = ScreenToCad(screenPoint); UpdatePreviewVisual(); }
     }
 
-    private void OnSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        InvalidateCache(); // Size changed - need new bitmap
-        Render();
-    }
+    private void OnSizeChanged(object sender, SizeChangedEventArgs e) { InvalidateCache(); Render(); }
+
+    // ── Selection / move completion ──────────────────────────────────────────
 
     private void CompleteMarqueeSelection(MouseButtonEventArgs e)
     {
         _isMarqueeSelecting = false;
         ReleaseMouseCapture();
-
         var screenPoint = e.GetPosition(this);
-        bool addToSelection = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
+        bool add = Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl);
 
-        // Check if drag was too small (treat as click on empty space)
-        double dragDist = Math.Max(
-            Math.Abs(screenPoint.X - _marqueeStartScreen.X),
-            Math.Abs(screenPoint.Y - _marqueeStartScreen.Y));
+        double drag = Math.Max(Math.Abs(screenPoint.X - _marqueeStartScreen.X),
+                               Math.Abs(screenPoint.Y - _marqueeStartScreen.Y));
+        if (drag < 3) { EntityClicked?.Invoke(this, new CadEntityClickEventArgs(null, add)); Render(); return; }
 
-        if (dragDist < 3)
-        {
-            // No significant drag - treat as click on empty space (clear selection)
-            EntityClicked?.Invoke(this, new CadEntityClickEventArgs(null, addToSelection));
-            Render();
-            return;
-        }
-
-        // Convert screen corners to CAD space
         var cadStart = ScreenToCad(_marqueeStartScreen);
-        var cadEnd = ScreenToCad(screenPoint);
+        var cadEnd   = ScreenToCad(screenPoint);
+        var selRect  = new Rect(
+            Math.Min(cadStart.X, cadEnd.X), Math.Min(cadStart.Y, cadEnd.Y),
+            Math.Abs(cadEnd.X - cadStart.X), Math.Abs(cadEnd.Y - cadStart.Y));
+        bool isWindow = cadEnd.X > cadStart.X;
 
-        double minX = Math.Min(cadStart.X, cadEnd.X);
-        double maxX = Math.Max(cadStart.X, cadEnd.X);
-        double minY = Math.Min(cadStart.Y, cadEnd.Y);
-        double maxY = Math.Max(cadStart.Y, cadEnd.Y);
-        var selectionRect = new Rect(minX, minY, maxX - minX, maxY - minY);
+        var entities = Entities; if (entities == null) { Render(); return; }
+        var matched = new List<Entity>();
 
-        // Determine selection mode: left-to-right = window (inside), right-to-left = crossing (intersect)
-        bool isWindowSelection = cadEnd.X > cadStart.X;
-
-        var entities = Entities;
-        if (entities == null)
+        foreach (var ent in entities)
         {
-            Render();
-            return;
+            if (HiddenLayers != null && ent.Layer != null && HiddenLayers.Any(l => l == ent.Layer.Name)) continue;
+            if (IsEntityLocked(ent) || IsWalkwayEdge(ent)) continue;
+            var b = BoundingBoxHelper.GetBounds(ent); if (b == null) continue;
+            if (isWindow ? selRect.Contains(b.Value) : selRect.IntersectsWith(b.Value))
+                matched.Add(ent);
         }
 
-        var matchedEntities = new List<Entity>();
-        foreach (var entity in entities)
-        {
-            // Skip hidden layers
-            if (HiddenLayers != null && entity.Layer != null &&
-                HiddenLayers.Any(l => l == entity.Layer.Name))
-                continue;
-
-            // Skip locked entities and walkway edges
-            if (IsEntityLocked(entity) || IsWalkwayEdge(entity))
-                continue;
-
-            var bounds = BoundingBoxHelper.GetBounds(entity);
-            if (bounds == null)
-                continue;
-
-            if (isWindowSelection)
-            {
-                // Window mode: entity must be fully inside
-                if (selectionRect.Contains(bounds.Value))
-                    matchedEntities.Add(entity);
-            }
-            else
-            {
-                // Crossing mode: entity bounds must intersect
-                if (selectionRect.IntersectsWith(bounds.Value))
-                    matchedEntities.Add(entity);
-            }
-        }
-
-        MarqueeSelectionCompleted?.Invoke(this, new MarqueeSelectionEventArgs(matchedEntities, addToSelection));
+        MarqueeSelectionCompleted?.Invoke(this, new MarqueeSelectionEventArgs(matched, add));
+        UpdatePreviewVisual();
         Render();
     }
 
@@ -1514,309 +1094,110 @@ public class CadCanvas : FrameworkElement
     {
         _isMoving = false;
         ReleaseMouseCapture();
-
-        var screenPoint = e.GetPosition(this);
-        var cadEnd = ScreenToCad(screenPoint);
-
-        double dx = cadEnd.X - _moveStartCadPoint.X;
-        double dy = cadEnd.Y - _moveStartCadPoint.Y;
-
-        // Check if move delta is negligible
-        double threshold = 1.0 / _scale;
-        if (Math.Abs(dx) < threshold && Math.Abs(dy) < threshold)
-        {
-            Render();
-            return;
-        }
-
-        MoveCompleted?.Invoke(this, new MoveCompletedEventArgs(dx, dy));
+        var cadEnd = ScreenToCad(e.GetPosition(this));
+        double dx = cadEnd.X - _moveStartCadPoint.X, dy = cadEnd.Y - _moveStartCadPoint.Y;
+        double thr = 1.0 / _scale;
+        if (Math.Abs(dx) >= thr || Math.Abs(dy) >= thr)
+            MoveCompleted?.Invoke(this, new MoveCompletedEventArgs(dx, dy));
+        UpdatePreviewVisual();
         Render();
-    }
-
-    private void RenderUnitNumberPreview(DrawingContext dc, UnitNumberTool unitTool)
-    {
-        var previewPoints = unitTool.GetPreviewPoints();
-        if (previewPoints == null || previewPoints.Count == 0)
-            return;
-
-        var cadPoint = previewPoints[0];
-        var screenPoint = CadToScreen(cadPoint.X, cadPoint.Y);
-
-        string text = unitTool.CurrentText;
-        if (string.IsNullOrEmpty(text))
-            return;
-
-        double fontSize = unitTool.TextHeight * _scale;
-        if (fontSize < 4) fontSize = 4;
-
-        var formattedText = new FormattedText(
-            text,
-            CultureInfo.InvariantCulture,
-            FlowDirection.LeftToRight,
-            new Typeface("Arial"),
-            fontSize,
-            Brushes.Cyan,
-            1.0);
-
-        // Draw text offset upward so bottom aligns with insert point (matching TextRenderer)
-        var textPosition = new WpfPoint(screenPoint.X, screenPoint.Y - formattedText.Height);
-        dc.PushOpacity(0.7);
-        dc.DrawText(formattedText, textPosition);
-        dc.Pop(); // opacity
-
-        // Draw small crosshair at placement point
-        double crossSize = 6;
-        dc.DrawLine(PreviewPen, new WpfPoint(screenPoint.X - crossSize, screenPoint.Y), new WpfPoint(screenPoint.X + crossSize, screenPoint.Y));
-        dc.DrawLine(PreviewPen, new WpfPoint(screenPoint.X, screenPoint.Y - crossSize), new WpfPoint(screenPoint.X, screenPoint.Y + crossSize));
-    }
-
-    /// <summary>
-    /// Configures the UnitNumberTool properties for preview and placement.
-    /// </summary>
-    public void ConfigureUnitNumberTool(string prefix, int nextNumber, string format, double textHeight)
-    {
-        if (_currentTool is UnitNumberTool unitTool)
-        {
-            unitTool.Prefix = prefix;
-            unitTool.NextNumber = nextNumber;
-            unitTool.FormatString = format;
-            unitTool.TextHeight = textHeight;
-            Render();
-        }
     }
 
     private void HandleDoubleClick(MouseButtonEventArgs e)
     {
-        var screenPoint = e.GetPosition(this);
-        var cadPoint = ScreenToCad(screenPoint);
+        var cad = ScreenToCad(e.GetPosition(this));
+        double tol = 5.0 / _scale;
+        var entities = Entities; if (entities == null) return;
 
-        var entities = Entities;
-        if (entities == null)
-            return;
+        Entity? hit = null;
+        var candidates = _spatialGrid != null
+            ? (IEnumerable<Entity>)_spatialGrid.Query(cad, tol)
+            : entities;
 
-        double tolerance = 5.0 / _scale;
+        foreach (var ent in candidates)
+            if (ent is MText mt && mt.Layer?.Name == CadDocumentModel.UnitNumbersLayerName
+                && HitTestHelper.HitTest(ent, cad, tol))
+            { hit = ent; break; }
 
-        Entity? hitEntity = null;
-        if (_spatialGrid != null)
-        {
-            var candidates = _spatialGrid.Query(cadPoint, tolerance);
-            foreach (var entity in candidates)
-            {
-                if (entity is MText mtext && mtext.Layer?.Name == CadDocumentModel.UnitNumbersLayerName &&
-                    HitTestHelper.HitTest(entity, cadPoint, tolerance))
-                {
-                    hitEntity = entity;
-                    break;
-                }
-            }
-        }
-        else
-        {
-            foreach (var entity in entities)
-            {
-                if (entity is MText mtext && mtext.Layer?.Name == CadDocumentModel.UnitNumbersLayerName &&
-                    HitTestHelper.HitTest(entity, cadPoint, tolerance))
-                {
-                    hitEntity = entity;
-                    break;
-                }
-            }
-        }
-
-        if (hitEntity != null)
-        {
-            EntityDoubleClicked?.Invoke(this, new CadEntityClickEventArgs(hitEntity, false));
-            e.Handled = true;
-        }
-    }
-
-    private void RenderPathHighlight(DrawingContext dc, IEnumerable<Entity> entities)
-    {
-        var highlights = HighlightedPathHandles;
-        if (highlights == null || highlights.Count == 0 || _entityByHandle == null)
-            return;
-
-        var highlightPen = new Pen(Brushes.Orange, 3.0);
-        highlightPen.Freeze();
-        var highlightBrush = Brushes.Orange;
-
-        var renderContext = new RenderContext
-        {
-            Scale = _scale,
-            Offset = _offset,
-            DefaultColor = Colors.Orange,
-            LineThickness = 3.0,
-            ShowSelection = false,
-            ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds()
-        };
-
-        var highlightedEntities = new List<Entity>();
-        foreach (var handle in highlights)
-        {
-            if (_entityByHandle.TryGetValue(handle, out var entity))
-                highlightedEntities.Add(entity);
-        }
-
-        _renderService.RenderEntities(dc, highlightedEntities, renderContext);
-    }
-
-    private void RenderFairwayPreview(DrawingContext dc)
-    {
-        if (_currentTool is not FairwayTool fairwayTool)
-            return;
-
-        // Draw rubber-band line from last node to cursor
-        var previewPoints = fairwayTool.GetPreviewPoints();
-        if (previewPoints != null && previewPoints.Count >= 2)
-        {
-            var screenPoints = previewPoints.Select(p => CadToScreen(p.X, p.Y)).ToList();
-            dc.DrawLine(PreviewPen, screenPoints[0], screenPoints[1]);
-        }
-
-        // Draw circle preview at cursor position
-        var cursorScreen = CadToScreen(_currentCadPoint.X, _currentCadPoint.Y);
-        double screenRadius = fairwayTool.NodeRadius * _scale;
-        if (screenRadius < 4) screenRadius = 4;
-        if (screenRadius > 20) screenRadius = 20;
-        dc.DrawEllipse(null, PreviewPen, cursorScreen, screenRadius, screenRadius);
-
-        // Draw crosshair at cursor
-        double crossSize = 8;
-        dc.DrawLine(PreviewPen, new WpfPoint(cursorScreen.X - crossSize, cursorScreen.Y), new WpfPoint(cursorScreen.X + crossSize, cursorScreen.Y));
-        dc.DrawLine(PreviewPen, new WpfPoint(cursorScreen.X, cursorScreen.Y - crossSize), new WpfPoint(cursorScreen.X, cursorScreen.Y + crossSize));
-    }
-
-    /// <summary>
-    /// Configures the FairwayTool with existing walkway node positions for snapping.
-    /// </summary>
-    public void ConfigureFairwayTool(List<(ulong handle, double x, double y)> existingNodes, double snapDistance = 5.0, double nodeRadius = 2.0)
-    {
-        if (_currentTool is FairwayTool fairwayTool)
-        {
-            fairwayTool.SetExistingNodes(existingNodes);
-            fairwayTool.SnapDistance = snapDistance;
-            fairwayTool.NodeRadius = nodeRadius;
-        }
+        if (hit != null) { EntityDoubleClicked?.Invoke(this, new CadEntityClickEventArgs(hit, false)); e.Handled = true; }
     }
 
     private bool HandleRightClickContextMenu(WpfPoint screenPoint)
     {
-        if (DrawingMode != DrawingMode.Select)
-            return false;
+        if (DrawingMode != DrawingMode.Select) return false;
+        var cad = ScreenToCad(screenPoint);
+        double tol = 5.0 / _scale;
+        Entity? hit = null;
 
-        var cadPoint = ScreenToCad(screenPoint);
-        double tolerance = 5.0 / _scale;
-
-        Entity? hitEntity = null;
         if (_spatialGrid != null)
-        {
-            var candidates = _spatialGrid.Query(cadPoint, tolerance);
-            foreach (var entity in candidates)
-            {
-                if (entity is Circle circle and not Arc &&
-                    circle.Layer?.Name == Models.CadDocumentModel.WalkwaysLayerName &&
-                    HitTestHelper.HitTest(entity, cadPoint, tolerance))
-                {
-                    hitEntity = entity;
-                    break;
-                }
-            }
-        }
+            foreach (var ent in _spatialGrid.Query(cad, tol))
+                if (ent is Circle c and not Arc && c.Layer?.Name == Models.CadDocumentModel.WalkwaysLayerName
+                    && HitTestHelper.HitTest(ent, cad, tol))
+                { hit = ent; break; }
 
-        if (hitEntity is Circle walkwayCircle)
+        if (hit is Circle wc)
         {
-            var contextMenu = new System.Windows.Controls.ContextMenu();
-            var toggleItem = new System.Windows.Controls.MenuItem
+            var menu = new System.Windows.Controls.ContextMenu();
+            var item = new System.Windows.Controls.MenuItem
             {
-                Header = walkwayCircle.Color.Index == 3 ? "Set as Regular Node" : "Set as Entrance"
+                Header = wc.Color.Index == 3 ? "Set as Regular Node" : "Set as Entrance"
             };
-            toggleItem.Click += (_, _) =>
-            {
-                ToggleEntranceRequested?.Invoke(this, new ToggleEntranceEventArgs(walkwayCircle.Handle));
-            };
-            contextMenu.Items.Add(toggleItem);
-            contextMenu.PlacementTarget = this;
-            contextMenu.IsOpen = true;
+            item.Click += (_, _) => ToggleEntranceRequested?.Invoke(this, new ToggleEntranceEventArgs(wc.Handle));
+            menu.Items.Add(item);
+            menu.PlacementTarget = this;
+            menu.IsOpen = true;
             return true;
         }
-
         return false;
     }
 
-    private void StartPan(WpfPoint startPoint)
+    private void StartPan(WpfPoint start)
     {
-        _isPanning = true;
-        _panStart = startPoint;
-        CaptureMouse();
-        Cursor = Cursors.Hand;
+        _isPanning = true; _panStart = start; CaptureMouse(); Cursor = Cursors.Hand;
     }
 
     private void EndPan()
     {
-        _isPanning = false;
-        ReleaseMouseCapture();
+        _isPanning = false; ReleaseMouseCapture();
         Cursor = IsPanMode ? Cursors.Hand : Cursors.Arrow;
-
-        // Rebuild cache at new offset position for crisp rendering
         InvalidateCache();
         Render();
     }
+
+    private bool IsEntityLocked(Entity e) =>
+        _lockedHandlesSet.Contains(e.Handle) || (e.Layer != null && _lockedLayersSet.Contains(e.Layer.Name));
+
+    private static bool IsWalkwayEdge(Entity e) =>
+        e is Line && e.Layer?.Name == Models.CadDocumentModel.WalkwaysLayerName;
 }
 
-public class CadMouseEventArgs : EventArgs
-{
-    public double X { get; }
-    public double Y { get; }
+// ── Event arg classes ────────────────────────────────────────────────────────
 
-    public CadMouseEventArgs(double x, double y)
-    {
-        X = x;
-        Y = y;
-    }
+public class CadMouseEventArgs(double x, double y) : EventArgs
+{
+    public double X { get; } = x;
+    public double Y { get; } = y;
 }
 
-public class CadEntityClickEventArgs : EventArgs
+public class CadEntityClickEventArgs(Entity? entity, bool addToSelection) : EventArgs
 {
-    public Entity? Entity { get; }
-    public bool AddToSelection { get; }
-
-    public CadEntityClickEventArgs(Entity? entity, bool addToSelection)
-    {
-        Entity = entity;
-        AddToSelection = addToSelection;
-    }
+    public Entity? Entity { get; } = entity;
+    public bool AddToSelection { get; } = addToSelection;
 }
 
-public class MarqueeSelectionEventArgs : EventArgs
+public class MarqueeSelectionEventArgs(IReadOnlyList<Entity> selectedEntities, bool addToSelection) : EventArgs
 {
-    public IReadOnlyList<Entity> SelectedEntities { get; }
-    public bool AddToSelection { get; }
-
-    public MarqueeSelectionEventArgs(IReadOnlyList<Entity> selectedEntities, bool addToSelection)
-    {
-        SelectedEntities = selectedEntities;
-        AddToSelection = addToSelection;
-    }
+    public IReadOnlyList<Entity> SelectedEntities { get; } = selectedEntities;
+    public bool AddToSelection { get; } = addToSelection;
 }
 
-public class MoveCompletedEventArgs : EventArgs
+public class MoveCompletedEventArgs(double deltaX, double deltaY) : EventArgs
 {
-    public double DeltaX { get; }
-    public double DeltaY { get; }
-
-    public MoveCompletedEventArgs(double deltaX, double deltaY)
-    {
-        DeltaX = deltaX;
-        DeltaY = deltaY;
-    }
+    public double DeltaX { get; } = deltaX;
+    public double DeltaY { get; } = deltaY;
 }
 
-public class ToggleEntranceEventArgs : EventArgs
+public class ToggleEntranceEventArgs(ulong handle) : EventArgs
 {
-    public ulong Handle { get; }
-
-    public ToggleEntranceEventArgs(ulong handle)
-    {
-        Handle = handle;
-    }
+    public ulong Handle { get; } = handle;
 }

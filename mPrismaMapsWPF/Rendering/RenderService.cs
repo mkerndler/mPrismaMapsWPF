@@ -1,8 +1,8 @@
-using System.Windows.Media;
 using ACadSharp.Entities;
 using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Rendering.EntityRenderers;
+using SkiaSharp;
 
 namespace mPrismaMapsWPF.Rendering;
 
@@ -25,7 +25,7 @@ public class RenderService
         };
     }
 
-    public void RenderEntities(DrawingContext context, IEnumerable<Entity> entities, RenderContext renderContext)
+    public void RenderEntities(SKCanvas canvas, IEnumerable<Entity> entities, RenderContext renderContext)
     {
         // Two-pass rendering: Unit Areas and Background Contours first (underneath), then everything else
         // Pass 1: Render Unit Areas and Background Contours layer entities
@@ -45,7 +45,7 @@ public class RenderService
                     continue;
             }
 
-            RenderEntity(context, entity, renderContext);
+            RenderEntity(canvas, entity, renderContext);
         }
 
         // Pass 2: Render all other entities
@@ -65,17 +65,17 @@ public class RenderService
                     continue;
             }
 
-            RenderEntity(context, entity, renderContext);
+            RenderEntity(canvas, entity, renderContext);
         }
     }
 
-    public void RenderEntity(DrawingContext context, Entity entity, RenderContext renderContext)
+    public void RenderEntity(SKCanvas canvas, Entity entity, RenderContext renderContext)
     {
         foreach (var renderer in _renderers)
         {
             if (renderer.CanRender(entity))
             {
-                renderer.Render(context, entity, renderContext);
+                renderer.Render(canvas, entity, renderContext);
                 return;
             }
         }

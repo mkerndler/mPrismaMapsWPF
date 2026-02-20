@@ -183,7 +183,7 @@ public class DocumentService : IDocumentService
     {
         _logger.LogInformation("Closing document");
         CurrentDocument.Clear();
-        RenderCache.Clear();
+        SkiaRenderCache.Clear();
         DocumentClosed?.Invoke(this, EventArgs.Empty);
     }
 }

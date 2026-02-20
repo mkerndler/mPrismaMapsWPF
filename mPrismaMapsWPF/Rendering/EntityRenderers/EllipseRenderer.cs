@@ -1,6 +1,6 @@
-using System.Windows.Media;
 using ACadSharp.Entities;
 using mPrismaMapsWPF.Helpers;
+using SkiaSharp;
 
 namespace mPrismaMapsWPF.Rendering.EntityRenderers;
 
@@ -8,12 +8,10 @@ public class EllipseRenderer : IEntityRenderer
 {
     public bool CanRender(Entity entity) => entity is Ellipse;
 
-    public void Render(DrawingContext context, Entity entity, RenderContext renderContext)
+    public void Render(SKCanvas canvas, Entity entity, RenderContext renderContext)
     {
         if (entity is not Ellipse ellipse)
             return;
-
-        var pen = GetPen(ellipse, renderContext);
 
         var center = renderContext.Transform(ellipse.Center.X, ellipse.Center.Y);
 
@@ -22,31 +20,23 @@ public class EllipseRenderer : IEntityRenderer
             ellipse.MajorAxisEndPoint.Y * ellipse.MajorAxisEndPoint.Y);
         double minorRadius = majorRadius * ellipse.RadiusRatio;
 
-        double radiusX = renderContext.TransformDistance(majorRadius);
-        double radiusY = renderContext.TransformDistance(minorRadius);
+        float rx = (float)renderContext.TransformDistance(majorRadius);
+        float ry = (float)renderContext.TransformDistance(minorRadius);
 
-        double rotation = Math.Atan2(ellipse.MajorAxisEndPoint.Y, ellipse.MajorAxisEndPoint.X) * 180 / Math.PI;
+        double rotDeg = Math.Atan2(ellipse.MajorAxisEndPoint.Y, ellipse.MajorAxisEndPoint.X) * 180 / Math.PI;
 
-        context.PushTransform(new RotateTransform(-rotation, center.X, center.Y));
-        context.DrawEllipse(null, pen, center, radiusX, radiusY);
-        context.Pop();
+        canvas.Save();
+        canvas.RotateDegrees((float)-rotDeg, (float)center.X, (float)center.Y);
+        canvas.DrawOval((float)center.X, (float)center.Y, rx, ry, GetStrokePaint(ellipse, renderContext));
+        canvas.Restore();
     }
 
-    private static Pen GetPen(Ellipse ellipse, RenderContext renderContext)
+    private static SKPaint GetStrokePaint(Entity entity, RenderContext rc)
     {
-        Color color;
-        double thickness = renderContext.LineThickness;
-
-        if (renderContext.IsSelected(ellipse))
-        {
-            color = Colors.Cyan;
-            thickness *= 2;
-        }
-        else
-        {
-            color = ColorHelper.GetEntityColor(ellipse, renderContext.DefaultColor);
-        }
-
-        return RenderCache.GetPen(color, thickness);
+        SKColor color = rc.IsSelected(entity) ? SKColors.Cyan
+            : ColorHelper.GetEntityColor(entity, rc.DefaultColor).ToSKColor();
+        float thickness = rc.IsSelected(entity)
+            ? (float)rc.LineThickness * 2 : (float)rc.LineThickness;
+        return SkiaRenderCache.GetStrokePaint(color, thickness);
     }
 }

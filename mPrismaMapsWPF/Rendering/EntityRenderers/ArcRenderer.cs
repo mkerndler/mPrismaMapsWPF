@@ -1,7 +1,6 @@
-using System.Windows;
-using System.Windows.Media;
 using ACadSharp.Entities;
 using mPrismaMapsWPF.Helpers;
+using SkiaSharp;
 
 namespace mPrismaMapsWPF.Rendering.EntityRenderers;
 
@@ -9,68 +8,37 @@ public class ArcRenderer : IEntityRenderer
 {
     public bool CanRender(Entity entity) => entity is Arc;
 
-    public void Render(DrawingContext context, Entity entity, RenderContext renderContext)
+    public void Render(SKCanvas canvas, Entity entity, RenderContext renderContext)
     {
         if (entity is not Arc arc)
             return;
 
-        var pen = GetPen(arc, renderContext);
-        var geometry = CreateArcGeometry(arc, renderContext);
+        var center = renderContext.Transform(arc.Center.X, arc.Center.Y);
+        float r = (float)renderContext.TransformDistance(arc.Radius);
 
-        context.DrawGeometry(null, pen, geometry);
+        // ACadSharp exposes arc angles in degrees (DXF convention).
+        // Negate to convert from CAD (CCW, Y-up) to Skia screen (CW, Y-down).
+        float startDeg = -(float)arc.StartAngle;
+        double cadSweep = arc.EndAngle - arc.StartAngle;
+        if (cadSweep < 0) cadSweep += 360.0;
+        float sweepDeg = -(float)cadSweep;
+
+        var oval = new SKRect(
+            (float)center.X - r, (float)center.Y - r,
+            (float)center.X + r, (float)center.Y + r);
+
+        using var path = new SKPath();
+        path.ArcTo(oval, startDeg, sweepDeg, true);
+
+        canvas.DrawPath(path, GetStrokePaint(arc, renderContext));
     }
 
-    private static StreamGeometry CreateArcGeometry(Arc arc, RenderContext renderContext)
+    private static SKPaint GetStrokePaint(Entity entity, RenderContext rc)
     {
-        double radius = renderContext.TransformDistance(arc.Radius);
-
-        double startX = arc.Center.X + arc.Radius * Math.Cos(arc.StartAngle);
-        double startY = arc.Center.Y + arc.Radius * Math.Sin(arc.StartAngle);
-        double endX = arc.Center.X + arc.Radius * Math.Cos(arc.EndAngle);
-        double endY = arc.Center.Y + arc.Radius * Math.Sin(arc.EndAngle);
-
-        var start = renderContext.Transform(startX, startY);
-        var end = renderContext.Transform(endX, endY);
-
-        double sweepAngle = arc.EndAngle - arc.StartAngle;
-        if (sweepAngle < 0)
-            sweepAngle += 2 * Math.PI;
-
-        bool isLargeArc = sweepAngle > Math.PI;
-
-        var geometry = new StreamGeometry();
-        using (var ctx = geometry.Open())
-        {
-            ctx.BeginFigure(start, false, false);
-            ctx.ArcTo(
-                end,
-                new Size(radius, radius),
-                0,
-                isLargeArc,
-                SweepDirection.Counterclockwise,
-                true,
-                false);
-        }
-
-        geometry.Freeze();
-        return geometry;
-    }
-
-    private static Pen GetPen(Arc arc, RenderContext renderContext)
-    {
-        Color color;
-        double thickness = renderContext.LineThickness;
-
-        if (renderContext.IsSelected(arc))
-        {
-            color = Colors.Cyan;
-            thickness *= 2;
-        }
-        else
-        {
-            color = ColorHelper.GetEntityColor(arc, renderContext.DefaultColor);
-        }
-
-        return RenderCache.GetPen(color, thickness);
+        SKColor color = rc.IsSelected(entity) ? SKColors.Cyan
+            : ColorHelper.GetEntityColor(entity, rc.DefaultColor).ToSKColor();
+        float thickness = rc.IsSelected(entity)
+            ? (float)rc.LineThickness * 2 : (float)rc.LineThickness;
+        return SkiaRenderCache.GetStrokePaint(color, thickness);
     }
 }

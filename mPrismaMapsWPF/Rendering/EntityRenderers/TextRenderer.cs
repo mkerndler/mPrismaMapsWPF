@@ -1,8 +1,7 @@
-using System.Windows;
-using System.Windows.Media;
 using ACadSharp.Entities;
 using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
+using SkiaSharp;
 
 namespace mPrismaMapsWPF.Rendering.EntityRenderers;
 
@@ -10,126 +9,104 @@ public class TextRenderer : IEntityRenderer
 {
     public bool CanRender(Entity entity) => entity is TextEntity or MText;
 
-    public void Render(DrawingContext context, Entity entity, RenderContext renderContext)
+    public void Render(SKCanvas canvas, Entity entity, RenderContext renderContext)
     {
         switch (entity)
         {
             case TextEntity text:
-                RenderText(context, text, renderContext);
+                RenderText(canvas, text, renderContext);
                 break;
             case MText mtext:
-                RenderMText(context, mtext, renderContext);
+                RenderMText(canvas, mtext, renderContext);
                 break;
         }
     }
 
-    private static void RenderText(DrawingContext context, TextEntity text, RenderContext renderContext)
+    private static void RenderText(SKCanvas canvas, TextEntity text, RenderContext renderContext)
     {
         if (string.IsNullOrEmpty(text.Value))
             return;
 
         var position = renderContext.Transform(text.InsertPoint.X, text.InsertPoint.Y);
-        double fontSize = renderContext.TransformDistance(text.Height);
+        float fontSize = (float)renderContext.TransformDistance(text.Height);
+        if (fontSize < 1) fontSize = 1;
 
-        if (fontSize < 1)
-            fontSize = 1;
+        SKColor color = renderContext.IsSelected(text) ? SKColors.Cyan
+            : ColorHelper.GetEntityColor(text, renderContext.DefaultColor).ToSKColor();
 
-        Color color;
-        if (renderContext.IsSelected(text))
+        double rotDeg = text.Rotation * 180 / Math.PI;
+
+        using var font = SkiaRenderCache.MakeFont(fontSize);
+        using var paint = new SKPaint { Color = color, IsAntialias = true };
+
+        float x = (float)position.X;
+        float y = (float)position.Y;
+
+        if (Math.Abs(rotDeg) > 0.01)
         {
-            color = Colors.Cyan;
-        }
-        else
-        {
-            color = ColorHelper.GetEntityColor(text, renderContext.DefaultColor);
-        }
-
-        var formattedText = RenderCache.GetFormattedText(
-            text.Handle,
-            text.Value,
-            fontSize,
-            color);
-
-        // Offset upward so the baseline (bottom of text) aligns with the insert point
-        var textPosition = new System.Windows.Point(position.X, position.Y - formattedText.Height);
-
-        double rotation = text.Rotation * 180 / Math.PI;
-        if (Math.Abs(rotation) > 0.01)
-        {
-            context.PushTransform(new RotateTransform(rotation, position.X, position.Y));
+            canvas.Save();
+            canvas.RotateDegrees(-(float)rotDeg, x, y);
         }
 
-        context.DrawText(formattedText, textPosition);
+        canvas.DrawText(text.Value, x, y, font, paint);
 
-        if (Math.Abs(rotation) > 0.01)
-        {
-            context.Pop();
-        }
+        if (Math.Abs(rotDeg) > 0.01)
+            canvas.Restore();
     }
 
-    private static void RenderMText(DrawingContext context, MText mtext, RenderContext renderContext)
+    private static void RenderMText(SKCanvas canvas, MText mtext, RenderContext renderContext)
     {
         if (string.IsNullOrEmpty(mtext.Value))
             return;
 
         var position = renderContext.Transform(mtext.InsertPoint.X, mtext.InsertPoint.Y);
-        double fontSize = renderContext.TransformDistance(mtext.Height);
+        float fontSize = (float)renderContext.TransformDistance(mtext.Height);
 
-        // Enforce a minimum screen size for unit number labels so they stay readable when zoomed out.
         if (mtext.Layer?.Name == CadDocumentModel.UnitNumbersLayerName)
-            fontSize = Math.Max(fontSize, 8.0);
+            fontSize = Math.Max(fontSize, 8f);
 
-        if (fontSize < 1)
-            fontSize = 1;
+        if (fontSize < 1) fontSize = 1;
 
-        Color color;
-        if (renderContext.IsSelected(mtext))
-        {
-            color = Colors.Cyan;
-        }
-        else
-        {
-            color = ColorHelper.GetEntityColor(mtext, renderContext.DefaultColor);
-        }
+        SKColor color = renderContext.IsSelected(mtext) ? SKColors.Cyan
+            : ColorHelper.GetEntityColor(mtext, renderContext.DefaultColor).ToSKColor();
 
         string cleanText = StripMTextFormatting(mtext.Value);
-        double maxWidth = mtext.RectangleWidth > 0 ? renderContext.TransformDistance(mtext.RectangleWidth) : 0;
+        double rotDeg = mtext.Rotation * 180 / Math.PI;
 
-        var formattedText = RenderCache.GetFormattedText(
-            mtext.Handle,
-            cleanText,
-            fontSize,
-            color,
-            maxWidth);
+        using var font = SkiaRenderCache.MakeFont(fontSize);
+        using var paint = new SKPaint { Color = color, IsAntialias = true };
 
-        // Offset upward so the bottom of the text aligns with the insert point
-        var textPosition = new System.Windows.Point(position.X, position.Y - formattedText.Height);
+        float x = (float)position.X;
+        float y = (float)position.Y;
 
-        double rotation = mtext.Rotation * 180 / Math.PI;
-        if (Math.Abs(rotation) > 0.01)
+        if (Math.Abs(rotDeg) > 0.01)
         {
-            context.PushTransform(new RotateTransform(rotation, position.X, position.Y));
+            canvas.Save();
+            canvas.RotateDegrees(-(float)rotDeg, x, y);
         }
 
-        context.DrawText(formattedText, textPosition);
-
-        if (Math.Abs(rotation) > 0.01)
+        // Multi-line support: split on \n, advance by font.Spacing per line
+        var lines = cleanText.Split('\n');
+        float lineY = y;
+        foreach (var line in lines)
         {
-            context.Pop();
+            canvas.DrawText(line, x, lineY, font, paint);
+            lineY += font.Spacing;
         }
+
+        if (Math.Abs(rotDeg) > 0.01)
+            canvas.Restore();
     }
 
     private static string StripMTextFormatting(string mtext)
     {
         var result = mtext;
-
         result = System.Text.RegularExpressions.Regex.Replace(result, @"\\[A-Za-z][^;]*;", "");
         result = System.Text.RegularExpressions.Regex.Replace(result, @"\{|\}", "");
         result = result.Replace("\\P", "\n");
         result = result.Replace("%%c", "Ø");
         result = result.Replace("%%d", "°");
         result = result.Replace("%%p", "±");
-
         return result;
     }
 }
