@@ -54,6 +54,7 @@ public partial class MainWindow : Window
         CadCanvas.DrawingCompleted += OnDrawingCompleted;
         CadCanvas.MarqueeSelectionCompleted += OnMarqueeSelectionCompleted;
         CadCanvas.MoveCompleted += OnMoveCompleted;
+        CadCanvas.TransformCompleted += OnTransformCompleted;
         CadCanvas.ToggleEntranceRequested += OnToggleEntranceRequested;
 
         _viewModel.EditUnitNumberRequested += OnEditUnitNumberRequested;
@@ -314,6 +315,13 @@ public partial class MainWindow : Window
     private void OnMoveCompleted(object? sender, MoveCompletedEventArgs e)
     {
         _viewModel.OnMoveCompleted(e);
+        UpdateCanvasBindings();
+        CadCanvas.RebuildSpatialIndex();
+    }
+
+    private void OnTransformCompleted(object? sender, TransformCompletedEventArgs e)
+    {
+        _viewModel.OnTransformCompleted(e);
         UpdateCanvasBindings();
         CadCanvas.RebuildSpatialIndex();
     }

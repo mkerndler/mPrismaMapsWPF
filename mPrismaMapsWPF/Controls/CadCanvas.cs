@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -75,6 +75,18 @@ public class CadCanvas : FrameworkElement
     private bool _isMoving;
     private WpfPoint _moveStartCadPoint;
     private WpfPoint _moveCurrentCadPoint;
+
+    // Transform drag state
+    private bool _isTransformDragging;
+    private TransformHandle _activeTransformHandle;
+    private TransformHandle _hoveredTransformHandle;
+    private WpfPoint _transformStartScreenPoint;
+    private Rect _transformBoundingBoxCad;
+    private Rect _transformBoundingBoxScreen;
+    private double _transformStartAngle;
+    private double _transformCurrentAngle;
+    private double _transformScaleX = 1.0;
+    private double _transformScaleY = 1.0;
 
     // Static WPF pens for GPU-rendered overlays
     private static readonly Pen GridPenMinor = CreateGridPen(WpfColor.FromArgb(40, 128, 128, 128));
@@ -264,6 +276,7 @@ public class CadCanvas : FrameworkElement
     public event EventHandler<DrawingCompletedEventArgs>? DrawingCompleted;
     public event EventHandler<MarqueeSelectionEventArgs>? MarqueeSelectionCompleted;
     public event EventHandler<MoveCompletedEventArgs>? MoveCompleted;
+    public event EventHandler<TransformCompletedEventArgs>? TransformCompleted;
     public event EventHandler<ToggleEntranceEventArgs>? ToggleEntranceRequested;
 
     // ── Public API ───────────────────────────────────────────────────────────
@@ -418,6 +431,8 @@ public class CadCanvas : FrameworkElement
         RenderDrawingPreview(dc);
         RenderMarqueePreview(dc);
         RenderMovePreview(dc);
+        RenderTransformHandles(dc);
+        RenderTransformPreview(dc);
         RestoreViewTransform(dc);
     }
 
@@ -825,6 +840,7 @@ public class CadCanvas : FrameworkElement
         Render();
     }
 
+
     private void UpdateDrawingTool()
     {
         IDrawingTool? tool = DrawingMode switch
@@ -862,6 +878,7 @@ public class CadCanvas : FrameworkElement
             DrawingMode.DrawLine or DrawingMode.DrawPolyline or DrawingMode.DrawPolygon
                 or DrawingMode.ZoomToArea or DrawingMode.PlaceUnitNumber or DrawingMode.DrawFairway
                 => Cursors.Cross,
+            DrawingMode.Transform => Cursors.Arrow,
             _ => Cursors.Arrow
         };
     }
@@ -932,6 +949,19 @@ public class CadCanvas : FrameworkElement
         {
             if (_isMarqueeSelecting) { _isMarqueeSelecting = false; ReleaseMouseCapture(); UpdatePreviewVisual(); Render(); e.Handled = true; return; }
             if (_isMoving)           { _isMoving = false;           ReleaseMouseCapture(); UpdatePreviewVisual(); Render(); e.Handled = true; return; }
+
+            if (_isTransformDragging)
+            {
+                _isTransformDragging = false;
+                _transformScaleX = 1.0;
+                _transformScaleY = 1.0;
+                _transformCurrentAngle = 0;
+                ReleaseMouseCapture();
+                UpdatePreviewVisual();
+                Render();
+                e.Handled = true;
+                return;
+            }
         }
         if (_currentTool != null) { _currentTool.OnKeyDown(e.Key); UpdatePreviewVisual(); Render(); e.Handled = true; }
     }
@@ -964,6 +994,39 @@ public class CadCanvas : FrameworkElement
         }
 
         if (IsPanMode || DrawingMode == DrawingMode.Pan) { StartPan(screenPoint); return; }
+
+        // Transform mode - handle hit testing
+        if (DrawingMode == DrawingMode.Transform && _selectedHandlesSet.Count > 0)
+        {
+            var bbox = GetSelectedEntitiesBoundingBox();
+            if (bbox.HasValue)
+            {
+                var bboxScreen = CadBoundsToScreenRect(bbox.Value);
+                var handle = TransformHitTestHelper.HitTest(screenPoint, bboxScreen);
+                if (handle != TransformHandle.None)
+                {
+                    _isTransformDragging = true;
+                    _activeTransformHandle = handle;
+                    _transformStartScreenPoint = screenPoint;
+                    _transformBoundingBoxCad = bbox.Value;
+                    _transformBoundingBoxScreen = bboxScreen;
+                    _transformScaleX = 1.0;
+                    _transformScaleY = 1.0;
+                    _transformCurrentAngle = 0;
+
+                    if (handle == TransformHandle.Rotation)
+                    {
+                        double centerX = (_transformBoundingBoxScreen.Left + _transformBoundingBoxScreen.Right) / 2;
+                        double centerY = (_transformBoundingBoxScreen.Top + _transformBoundingBoxScreen.Bottom) / 2;
+                        _transformStartAngle = Math.Atan2(screenPoint.Y - centerY, screenPoint.X - centerX);
+                    }
+
+                    CaptureMouse();
+                    return;
+                }
+            }
+        }
+
 
         var cadPoint = ScreenToCad(screenPoint);
         var entities = Entities; if (entities == null) return;
@@ -1005,7 +1068,13 @@ public class CadCanvas : FrameworkElement
         }
 
         if (_isMarqueeSelecting) { CompleteMarqueeSelection(e); return; }
-        if (_isMoving)           { CompleteMoveOperation(e); }
+        if (_isMoving)           { CompleteMoveOperation(e); return; }
+
+        if (_isTransformDragging)
+        {
+            CompleteTransformOperation();
+            return;
+        }
     }
 
     private void OnMouseRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -1049,6 +1118,37 @@ public class CadCanvas : FrameworkElement
 
         if (_isMarqueeSelecting) { _marqueeCurrentScreen = screenPoint; UpdatePreviewVisual(); }
         if (_isMoving)           { _moveCurrentCadPoint = ScreenToCad(screenPoint); UpdatePreviewVisual(); }
+
+        if (_isTransformDragging)
+        {
+            if (_activeTransformHandle == TransformHandle.Rotation)
+            {
+                double centerX = (_transformBoundingBoxScreen.Left + _transformBoundingBoxScreen.Right) / 2;
+                double centerY = (_transformBoundingBoxScreen.Top + _transformBoundingBoxScreen.Bottom) / 2;
+                double currentAngle = Math.Atan2(screenPoint.Y - centerY, screenPoint.X - centerX);
+                _transformCurrentAngle = currentAngle - _transformStartAngle;
+            }
+            else
+            {
+                ComputeScaleFromHandle(screenPoint);
+            }
+            UpdatePreviewVisual();
+        }
+        else if (DrawingMode == DrawingMode.Transform && _selectedHandlesSet.Count > 0 && !_isPanning)
+        {
+            var bbox = GetSelectedEntitiesBoundingBox();
+            if (bbox.HasValue)
+            {
+                var bboxScreen = CadBoundsToScreenRect(bbox.Value);
+                var prevHovered = _hoveredTransformHandle;
+                _hoveredTransformHandle = TransformHitTestHelper.HitTest(screenPoint, bboxScreen);
+                if (_hoveredTransformHandle != prevHovered)
+                {
+                    UpdateTransformCursor();
+                    UpdatePreviewVisual();
+                }
+            }
+        }
     }
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e) { InvalidateCache(); Render(); }
@@ -1169,6 +1269,254 @@ public class CadCanvas : FrameworkElement
 
     private static bool IsWalkwayEdge(Entity e) =>
         e is Line && e.Layer?.Name == Models.CadDocumentModel.WalkwaysLayerName;
+
+    private Rect? GetSelectedEntitiesBoundingBox()
+    {
+        if (_selectedHandlesSet.Count == 0 || _entityByHandle == null)
+            return null;
+
+        double minX = double.MaxValue, minY = double.MaxValue;
+        double maxX = double.MinValue, maxY = double.MinValue;
+        bool hasBounds = false;
+
+        foreach (var handle in _selectedHandlesSet)
+        {
+            if (_entityByHandle.TryGetValue(handle, out var entity))
+            {
+                var bounds = BoundingBoxHelper.GetBounds(entity);
+                if (bounds.HasValue)
+                {
+                    hasBounds = true;
+                    minX = Math.Min(minX, bounds.Value.Left);
+                    minY = Math.Min(minY, bounds.Value.Top);
+                    maxX = Math.Max(maxX, bounds.Value.Right);
+                    maxY = Math.Max(maxY, bounds.Value.Bottom);
+                }
+            }
+        }
+
+        return hasBounds ? new Rect(minX, minY, maxX - minX, maxY - minY) : null;
+    }
+
+    private Rect CadBoundsToScreenRect(Rect cadBounds)
+    {
+        var topLeft = CadToScreen(cadBounds.Left, cadBounds.Bottom);
+        var bottomRight = CadToScreen(cadBounds.Right, cadBounds.Top);
+        double left = Math.Min(topLeft.X, bottomRight.X);
+        double top = Math.Min(topLeft.Y, bottomRight.Y);
+        double width = Math.Abs(bottomRight.X - topLeft.X);
+        double height = Math.Abs(bottomRight.Y - topLeft.Y);
+        return new Rect(left, top, width, height);
+    }
+
+    private void ComputeScaleFromHandle(WpfPoint currentScreen)
+    {
+        double bboxW = _transformBoundingBoxScreen.Width;
+        double bboxH = _transformBoundingBoxScreen.Height;
+        if (bboxW < 1) bboxW = 1;
+        if (bboxH < 1) bboxH = 1;
+
+        double dx = currentScreen.X - _transformStartScreenPoint.X;
+        double dy = currentScreen.Y - _transformStartScreenPoint.Y;
+
+        bool uniformConstraint = Keyboard.IsKeyDown(Key.LeftShift) || Keyboard.IsKeyDown(Key.RightShift);
+
+        switch (_activeTransformHandle)
+        {
+            case TransformHandle.BottomRight:
+                _transformScaleX = (bboxW + dx) / bboxW;
+                _transformScaleY = (bboxH + dy) / bboxH;
+                break;
+            case TransformHandle.BottomLeft:
+                _transformScaleX = (bboxW - dx) / bboxW;
+                _transformScaleY = (bboxH + dy) / bboxH;
+                break;
+            case TransformHandle.TopRight:
+                _transformScaleX = (bboxW + dx) / bboxW;
+                _transformScaleY = (bboxH - dy) / bboxH;
+                break;
+            case TransformHandle.TopLeft:
+                _transformScaleX = (bboxW - dx) / bboxW;
+                _transformScaleY = (bboxH - dy) / bboxH;
+                break;
+            case TransformHandle.MiddleRight:
+                _transformScaleX = (bboxW + dx) / bboxW;
+                _transformScaleY = 1.0;
+                break;
+            case TransformHandle.MiddleLeft:
+                _transformScaleX = (bboxW - dx) / bboxW;
+                _transformScaleY = 1.0;
+                break;
+            case TransformHandle.BottomCenter:
+                _transformScaleX = 1.0;
+                _transformScaleY = (bboxH + dy) / bboxH;
+                break;
+            case TransformHandle.TopCenter:
+                _transformScaleX = 1.0;
+                _transformScaleY = (bboxH - dy) / bboxH;
+                break;
+        }
+
+        // Prevent zero/negative scale
+        if (Math.Abs(_transformScaleX) < 0.01) _transformScaleX = 0.01;
+        if (Math.Abs(_transformScaleY) < 0.01) _transformScaleY = 0.01;
+
+        if (uniformConstraint && (_activeTransformHandle == TransformHandle.TopLeft ||
+            _activeTransformHandle == TransformHandle.TopRight ||
+            _activeTransformHandle == TransformHandle.BottomLeft ||
+            _activeTransformHandle == TransformHandle.BottomRight))
+        {
+            double uniform = Math.Max(_transformScaleX, _transformScaleY);
+            _transformScaleX = uniform;
+            _transformScaleY = uniform;
+        }
+    }
+
+    private void CompleteTransformOperation()
+    {
+        _isTransformDragging = false;
+        ReleaseMouseCapture();
+
+        bool isRotation = _activeTransformHandle == TransformHandle.Rotation;
+        bool hasSignificantTransform = isRotation
+            ? Math.Abs(_transformCurrentAngle) > 0.001
+            : Math.Abs(_transformScaleX - 1.0) > 0.001 || Math.Abs(_transformScaleY - 1.0) > 0.001;
+
+        if (hasSignificantTransform)
+        {
+            double pivotCadX = (_transformBoundingBoxCad.Left + _transformBoundingBoxCad.Right) / 2;
+            double pivotCadY = (_transformBoundingBoxCad.Top + _transformBoundingBoxCad.Bottom) / 2;
+
+            if (!isRotation)
+            {
+                // For resize, determine pivot based on opposite corner/edge
+                var (px, py) = GetResizePivot(_activeTransformHandle, _transformBoundingBoxCad);
+                pivotCadX = px;
+                pivotCadY = py;
+            }
+
+            var args = new TransformCompletedEventArgs(
+                pivotCadX, pivotCadY,
+                isRotation ? null : _transformScaleX,
+                isRotation ? null : _transformScaleY,
+                isRotation ? -_transformCurrentAngle : null);
+
+            TransformCompleted?.Invoke(this, args);
+        }
+
+        _transformScaleX = 1.0;
+        _transformScaleY = 1.0;
+        _transformCurrentAngle = 0;
+        Render();
+    }
+
+    private static (double x, double y) GetResizePivot(TransformHandle handle, Rect bbox)
+    {
+        // The CAD bounding box Rect uses WPF convention: Top = minCADY (screen bottom),
+        // Bottom = maxCADY (screen top). Pivot is always the opposite corner/edge.
+        return handle switch
+        {
+            TransformHandle.TopLeft => (bbox.Right, bbox.Top),
+            TransformHandle.TopCenter => ((bbox.Left + bbox.Right) / 2, bbox.Top),
+            TransformHandle.TopRight => (bbox.Left, bbox.Top),
+            TransformHandle.MiddleLeft => (bbox.Right, (bbox.Top + bbox.Bottom) / 2),
+            TransformHandle.MiddleRight => (bbox.Left, (bbox.Top + bbox.Bottom) / 2),
+            TransformHandle.BottomLeft => (bbox.Right, bbox.Bottom),
+            TransformHandle.BottomCenter => ((bbox.Left + bbox.Right) / 2, bbox.Bottom),
+            TransformHandle.BottomRight => (bbox.Left, bbox.Bottom),
+            _ => ((bbox.Left + bbox.Right) / 2, (bbox.Top + bbox.Bottom) / 2)
+        };
+    }
+
+    private void RenderTransformHandles(DrawingContext dc)
+    {
+        if (DrawingMode != DrawingMode.Transform || _selectedHandlesSet.Count == 0 || _isTransformDragging)
+            return;
+
+        var bbox = GetSelectedEntitiesBoundingBox();
+        if (!bbox.HasValue)
+            return;
+
+        var bboxScreen = CadBoundsToScreenRect(bbox.Value);
+        var handles = TransformHitTestHelper.GetHandlePositions(bboxScreen);
+
+        // Draw dashed bounding box
+        var dashedPen = new Pen(Brushes.CornflowerBlue, 1.0) { DashStyle = DashStyles.Dash };
+        dashedPen.Freeze();
+        dc.DrawRectangle(null, dashedPen, bboxScreen);
+
+        // Draw rotation handle line and circle
+        var topCenter = handles[TransformHandle.TopCenter];
+        var rotationPos = handles[TransformHandle.Rotation];
+        var rotLinePen = new Pen(Brushes.CornflowerBlue, 1.0);
+        rotLinePen.Freeze();
+        dc.DrawLine(rotLinePen, topCenter, rotationPos);
+
+        double handleSize = 4.0;
+        var defaultBrush = Brushes.White;
+        var hoverBrush = Brushes.Yellow;
+        var handlePen = new Pen(Brushes.Gray, 1.0);
+        handlePen.Freeze();
+
+        foreach (var (handle, pos) in handles)
+        {
+            var brush = handle == _hoveredTransformHandle ? hoverBrush : defaultBrush;
+            if (handle == TransformHandle.Rotation)
+            {
+                dc.DrawEllipse(brush, handlePen, pos, handleSize + 1, handleSize + 1);
+            }
+            else
+            {
+                dc.DrawRectangle(brush, handlePen,
+                    new Rect(pos.X - handleSize, pos.Y - handleSize, handleSize * 2, handleSize * 2));
+            }
+        }
+    }
+
+    private void RenderTransformPreview(DrawingContext dc)
+    {
+        if (!_isTransformDragging || _selectedHandlesSet.Count == 0 || _overlayBitmap == null)
+            return;
+
+        bool isRotation = _activeTransformHandle == TransformHandle.Rotation;
+        int w = _overlayBitmap.PixelWidth, h = _overlayBitmap.PixelHeight;
+
+        if (isRotation)
+        {
+            double cx = (_transformBoundingBoxScreen.Left + _transformBoundingBoxScreen.Right) / 2;
+            double cy = (_transformBoundingBoxScreen.Top + _transformBoundingBoxScreen.Bottom) / 2;
+            dc.PushTransform(new RotateTransform(
+                _transformCurrentAngle * (180.0 / Math.PI), cx, cy));
+        }
+        else
+        {
+            var (pivotCadX, pivotCadY) = GetResizePivot(_activeTransformHandle, _transformBoundingBoxCad);
+            var pivotScreen = CadToScreen(pivotCadX, pivotCadY);
+            var tg = new TransformGroup();
+            tg.Children.Add(new TranslateTransform(-pivotScreen.X, -pivotScreen.Y));
+            tg.Children.Add(new ScaleTransform(_transformScaleX, _transformScaleY));
+            tg.Children.Add(new TranslateTransform(pivotScreen.X, pivotScreen.Y));
+            dc.PushTransform(tg);
+        }
+
+        dc.PushOpacity(0.5);
+        dc.DrawImage(_overlayBitmap, new Rect(0, 0, w, h));
+        dc.Pop(); // opacity
+        dc.Pop(); // transform
+    }
+
+    private void UpdateTransformCursor()
+    {
+        Cursor = _hoveredTransformHandle switch
+        {
+            TransformHandle.TopLeft or TransformHandle.BottomRight => Cursors.SizeNWSE,
+            TransformHandle.TopRight or TransformHandle.BottomLeft => Cursors.SizeNESW,
+            TransformHandle.MiddleLeft or TransformHandle.MiddleRight => Cursors.SizeWE,
+            TransformHandle.TopCenter or TransformHandle.BottomCenter => Cursors.SizeNS,
+            TransformHandle.Rotation => Cursors.Hand,
+            _ => Cursors.Arrow
+        };
+    }
 }
 
 // ── Event arg classes ────────────────────────────────────────────────────────
@@ -1195,6 +1543,24 @@ public class MoveCompletedEventArgs(double deltaX, double deltaY) : EventArgs
 {
     public double DeltaX { get; } = deltaX;
     public double DeltaY { get; } = deltaY;
+}
+
+public class TransformCompletedEventArgs : EventArgs
+{
+    public double PivotX { get; }
+    public double PivotY { get; }
+    public double? ScaleX { get; }
+    public double? ScaleY { get; }
+    public double? AngleRadians { get; }
+
+    public TransformCompletedEventArgs(double pivotX, double pivotY, double? scaleX, double? scaleY, double? angleRadians)
+    {
+        PivotX = pivotX;
+        PivotY = pivotY;
+        ScaleX = scaleX;
+        ScaleY = scaleY;
+        AngleRadians = angleRadians;
+    }
 }
 
 public class ToggleEntranceEventArgs(ulong handle) : EventArgs

@@ -74,43 +74,52 @@ public static class EntityTransformHelper
         }
     }
 
+    // Backward-compat overload used by ScaleMapCommand (uniform scale around origin).
     public static void ScaleEntity(Entity entity, double factor)
+        => ScaleEntity(entity, 0, 0, factor, factor);
+
+    public static void ScaleEntity(Entity entity, double pivotX, double pivotY, double scaleX, double scaleY)
     {
         switch (entity)
         {
+            case Line line:
+                var (lsx, lsy) = ScalePoint(line.StartPoint.X, line.StartPoint.Y, pivotX, pivotY, scaleX, scaleY);
+                var (lex, ley) = ScalePoint(line.EndPoint.X, line.EndPoint.Y, pivotX, pivotY, scaleX, scaleY);
+                line.StartPoint = new XYZ(lsx, lsy, line.StartPoint.Z);
+                line.EndPoint = new XYZ(lex, ley, line.EndPoint.Z);
+                break;
+
             case Arc arc:
-                arc.Center = new XYZ(arc.Center.X * factor, arc.Center.Y * factor, arc.Center.Z * factor);
-                arc.Radius *= factor;
+                var (acx, acy) = ScalePoint(arc.Center.X, arc.Center.Y, pivotX, pivotY, scaleX, scaleY);
+                arc.Center = new XYZ(acx, acy, arc.Center.Z);
+                arc.Radius *= Math.Abs(scaleX);
                 break;
 
             case Circle circle:
-                circle.Center = new XYZ(circle.Center.X * factor, circle.Center.Y * factor, circle.Center.Z * factor);
-                circle.Radius *= factor;
-                break;
-
-            case Line line:
-                line.StartPoint = new XYZ(line.StartPoint.X * factor, line.StartPoint.Y * factor, line.StartPoint.Z * factor);
-                line.EndPoint = new XYZ(line.EndPoint.X * factor, line.EndPoint.Y * factor, line.EndPoint.Z * factor);
+                var (ccx, ccy) = ScalePoint(circle.Center.X, circle.Center.Y, pivotX, pivotY, scaleX, scaleY);
+                circle.Center = new XYZ(ccx, ccy, circle.Center.Z);
+                circle.Radius *= Math.Abs(scaleX);
                 break;
 
             case Ellipse ellipse:
-                ellipse.Center = new XYZ(ellipse.Center.X * factor, ellipse.Center.Y * factor, ellipse.Center.Z * factor);
+                var (ecx, ecy) = ScalePoint(ellipse.Center.X, ellipse.Center.Y, pivotX, pivotY, scaleX, scaleY);
+                ellipse.Center = new XYZ(ecx, ecy, ellipse.Center.Z);
                 ellipse.MajorAxisEndPoint = new XYZ(
-                    ellipse.MajorAxisEndPoint.X * factor,
-                    ellipse.MajorAxisEndPoint.Y * factor,
-                    ellipse.MajorAxisEndPoint.Z * factor);
+                    ellipse.MajorAxisEndPoint.X * scaleX,
+                    ellipse.MajorAxisEndPoint.Y * scaleY,
+                    ellipse.MajorAxisEndPoint.Z);
                 break;
 
             case LwPolyline lwPolyline:
                 for (int i = 0; i < lwPolyline.Vertices.Count; i++)
                 {
                     var v = lwPolyline.Vertices[i];
-                    lwPolyline.Vertices[i] = new LwPolyline.Vertex(
-                        new XY(v.Location.X * factor, v.Location.Y * factor))
+                    var (vx, vy) = ScalePoint(v.Location.X, v.Location.Y, pivotX, pivotY, scaleX, scaleY);
+                    lwPolyline.Vertices[i] = new LwPolyline.Vertex(new XY(vx, vy))
                     {
                         Bulge = v.Bulge,
-                        StartWidth = v.StartWidth * factor,
-                        EndWidth = v.EndWidth * factor
+                        StartWidth = v.StartWidth,
+                        EndWidth = v.EndWidth
                     };
                 }
                 break;
@@ -118,34 +127,134 @@ public static class EntityTransformHelper
             case Polyline2D polyline2D:
                 foreach (var vertex in polyline2D.Vertices)
                 {
-                    vertex.Location = new XYZ(
-                        vertex.Location.X * factor,
-                        vertex.Location.Y * factor,
-                        vertex.Location.Z * factor);
+                    var (vx, vy) = ScalePoint(vertex.Location.X, vertex.Location.Y, pivotX, pivotY, scaleX, scaleY);
+                    vertex.Location = new XYZ(vx, vy, vertex.Location.Z);
                 }
                 break;
 
             case MText mtext:
-                mtext.InsertPoint = new XYZ(mtext.InsertPoint.X * factor, mtext.InsertPoint.Y * factor, mtext.InsertPoint.Z * factor);
-                mtext.Height *= factor;
+                var (mtx, mty) = ScalePoint(mtext.InsertPoint.X, mtext.InsertPoint.Y, pivotX, pivotY, scaleX, scaleY);
+                mtext.InsertPoint = new XYZ(mtx, mty, mtext.InsertPoint.Z);
+                mtext.Height *= Math.Abs(scaleY);
+                if (mtext.RectangleWidth > 0)
+                    mtext.RectangleWidth *= Math.Abs(scaleX);
                 break;
 
             case TextEntity text:
-                text.InsertPoint = new XYZ(text.InsertPoint.X * factor, text.InsertPoint.Y * factor, text.InsertPoint.Z * factor);
-                text.Height *= factor;
+                var (tx, ty) = ScalePoint(text.InsertPoint.X, text.InsertPoint.Y, pivotX, pivotY, scaleX, scaleY);
+                text.InsertPoint = new XYZ(tx, ty, text.InsertPoint.Z);
+                text.Height *= Math.Abs(scaleY);
                 break;
 
             case Insert insert:
-                insert.InsertPoint = new XYZ(insert.InsertPoint.X * factor, insert.InsertPoint.Y * factor, insert.InsertPoint.Z * factor);
+                var (ix, iy) = ScalePoint(insert.InsertPoint.X, insert.InsertPoint.Y, pivotX, pivotY, scaleX, scaleY);
+                insert.InsertPoint = new XYZ(ix, iy, insert.InsertPoint.Z);
+                insert.XScale *= scaleX;
+                insert.YScale *= scaleY;
                 break;
 
             case Point point:
-                point.Location = new XYZ(point.Location.X * factor, point.Location.Y * factor, point.Location.Z * factor);
-                break;
-
-            default:
+                var (px, py) = ScalePoint(point.Location.X, point.Location.Y, pivotX, pivotY, scaleX, scaleY);
+                point.Location = new XYZ(px, py, point.Location.Z);
                 break;
         }
+    }
+
+    public static void RotateEntity(Entity entity, double pivotX, double pivotY, double angleRadians)
+    {
+        double cos = Math.Cos(angleRadians);
+        double sin = Math.Sin(angleRadians);
+        double angleDegrees = angleRadians * (180.0 / Math.PI);
+
+        switch (entity)
+        {
+            case Line line:
+                var (lsx, lsy) = RotatePoint(line.StartPoint.X, line.StartPoint.Y, pivotX, pivotY, cos, sin);
+                var (lex, ley) = RotatePoint(line.EndPoint.X, line.EndPoint.Y, pivotX, pivotY, cos, sin);
+                line.StartPoint = new XYZ(lsx, lsy, line.StartPoint.Z);
+                line.EndPoint = new XYZ(lex, ley, line.EndPoint.Z);
+                break;
+
+            case Arc arc:
+                var (acx, acy) = RotatePoint(arc.Center.X, arc.Center.Y, pivotX, pivotY, cos, sin);
+                arc.Center = new XYZ(acx, acy, arc.Center.Z);
+                arc.StartAngle += angleRadians;
+                arc.EndAngle += angleRadians;
+                break;
+
+            case Circle circle:
+                var (ccx, ccy) = RotatePoint(circle.Center.X, circle.Center.Y, pivotX, pivotY, cos, sin);
+                circle.Center = new XYZ(ccx, ccy, circle.Center.Z);
+                break;
+
+            case Ellipse ellipse:
+                var (ecx, ecy) = RotatePoint(ellipse.Center.X, ellipse.Center.Y, pivotX, pivotY, cos, sin);
+                ellipse.Center = new XYZ(ecx, ecy, ellipse.Center.Z);
+                double mx = ellipse.MajorAxisEndPoint.X;
+                double my = ellipse.MajorAxisEndPoint.Y;
+                ellipse.MajorAxisEndPoint = new XYZ(
+                    mx * cos - my * sin,
+                    mx * sin + my * cos,
+                    ellipse.MajorAxisEndPoint.Z);
+                break;
+
+            case LwPolyline lwPolyline:
+                for (int i = 0; i < lwPolyline.Vertices.Count; i++)
+                {
+                    var v = lwPolyline.Vertices[i];
+                    var (vx, vy) = RotatePoint(v.Location.X, v.Location.Y, pivotX, pivotY, cos, sin);
+                    lwPolyline.Vertices[i] = new LwPolyline.Vertex(new XY(vx, vy))
+                    {
+                        Bulge = v.Bulge,
+                        StartWidth = v.StartWidth,
+                        EndWidth = v.EndWidth
+                    };
+                }
+                break;
+
+            case Polyline2D polyline2D:
+                foreach (var vertex in polyline2D.Vertices)
+                {
+                    var (vx, vy) = RotatePoint(vertex.Location.X, vertex.Location.Y, pivotX, pivotY, cos, sin);
+                    vertex.Location = new XYZ(vx, vy, vertex.Location.Z);
+                }
+                break;
+
+            case MText mtext:
+                var (mtx, mty) = RotatePoint(mtext.InsertPoint.X, mtext.InsertPoint.Y, pivotX, pivotY, cos, sin);
+                mtext.InsertPoint = new XYZ(mtx, mty, mtext.InsertPoint.Z);
+                // MText.Rotation is read-only; position is rotated but text angle is not adjustable
+                break;
+
+            case TextEntity text:
+                var (tx, ty) = RotatePoint(text.InsertPoint.X, text.InsertPoint.Y, pivotX, pivotY, cos, sin);
+                text.InsertPoint = new XYZ(tx, ty, text.InsertPoint.Z);
+                text.Rotation += angleDegrees;
+                break;
+
+            case Insert insert:
+                var (ix, iy) = RotatePoint(insert.InsertPoint.X, insert.InsertPoint.Y, pivotX, pivotY, cos, sin);
+                insert.InsertPoint = new XYZ(ix, iy, insert.InsertPoint.Z);
+                insert.Rotation += angleDegrees;
+                break;
+
+            case Point point:
+                var (px, py) = RotatePoint(point.Location.X, point.Location.Y, pivotX, pivotY, cos, sin);
+                point.Location = new XYZ(px, py, point.Location.Z);
+                break;
+        }
+    }
+
+    private static (double x, double y) ScalePoint(double x, double y, double pivotX, double pivotY, double scaleX, double scaleY)
+    {
+        return (pivotX + (x - pivotX) * scaleX, pivotY + (y - pivotY) * scaleY);
+    }
+
+    private static (double x, double y) RotatePoint(double x, double y, double pivotX, double pivotY, double cos, double sin)
+    {
+        double dx = x - pivotX;
+        double dy = y - pivotY;
+        return (pivotX + dx * cos - dy * sin, pivotY + dx * sin + dy * cos);
     }
 
     public static Entity? CloneEntity(Entity entity)

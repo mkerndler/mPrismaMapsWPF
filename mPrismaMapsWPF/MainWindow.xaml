@@ -120,6 +120,8 @@
         <KeyBinding Key="N" Command="{Binding SetPlaceUnitNumberModeCommand}"/>
         <!-- Draw Fairway -->
         <KeyBinding Key="F" Command="{Binding SetDrawFairwayModeCommand}"/>
+        <!-- Transform -->
+        <KeyBinding Key="T" Command="{Binding SetTransformModeCommand}"/>
         <!-- Lock -->
         <KeyBinding Key="L" Modifiers="Ctrl" Command="{Binding LockSelectedCommand}"/>
         <!-- Generate Unit Areas -->
@@ -229,6 +231,7 @@
                 <Separator/>
                 <MenuItem Header="Place _Unit Number" Command="{Binding SetPlaceUnitNumberModeCommand}" InputGestureText="N"/>
                 <MenuItem Header="Draw _Fairway" Command="{Binding SetDrawFairwayModeCommand}" InputGestureText="F"/>
+                <MenuItem Header="_Transform (Resize/Rotate)" Command="{Binding SetTransformModeCommand}" InputGestureText="T"/>
                 <Separator/>
                 <MenuItem Header="Generate _Unit Areas" Command="{Binding GenerateUnitAreasCommand}" InputGestureText="Ctrl+Shift+U" ToolTip="Generate filled polygons for each unit number"/>
                 <MenuItem Header="Generate _Background Contours" Command="{Binding GenerateBackgroundContoursCommand}" InputGestureText="Ctrl+Shift+B" ToolTip="Generate polygon outlines around background geometry"/>
@@ -368,6 +371,13 @@
                               Command="{Binding SetDrawFairwayModeCommand}"
                               ToolTip="Draw Fairway (F)">
                     <TextBlock Text="&#xF0583;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
+                </ToggleButton>
+                <!-- Transform Tool -->
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding IsTransformMode, Mode=OneWay}"
+                              Command="{Binding SetTransformModeCommand}"
+                              ToolTip="Transform - Resize/Rotate (T)">
+                    <TextBlock Text="&#xF0464;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding GenerateUnitAreasCommand}"

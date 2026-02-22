@@ -9,5 +9,6 @@ public enum DrawingMode
     DrawPolygon,
     ZoomToArea,
     PlaceUnitNumber,
-    DrawFairway
+    DrawFairway,
+    Transform
 }

@@ -117,6 +117,9 @@ public partial class MainWindowViewModel : ObservableObject
     private bool _isDrawFairwayMode;
 
     [ObservableProperty]
+    private bool _isTransformMode;
+
+    [ObservableProperty]
     private bool _canUndo;
 
     [ObservableProperty]
@@ -492,6 +495,14 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void SetTransformMode()
+    {
+        DrawingMode = DrawingMode.Transform;
+        UpdateModeFlags();
+        DrawingStatusText = "Transform: Drag handles to resize, drag rotation handle to rotate. Hold Shift for uniform scale.";
+    }
+
+    [RelayCommand]
     private void ToggleSnap()
     {
         IsSnapEnabled = !IsSnapEnabled;
@@ -836,6 +847,7 @@ public partial class MainWindowViewModel : ObservableObject
         IsDrawPolygonMode = DrawingMode == DrawingMode.DrawPolygon;
         IsPlaceUnitNumberMode = DrawingMode == DrawingMode.PlaceUnitNumber;
         IsDrawFairwayMode = DrawingMode == DrawingMode.DrawFairway;
+        IsTransformMode = DrawingMode == DrawingMode.Transform;
 
         if (DrawingMode == DrawingMode.Select || DrawingMode == DrawingMode.Pan)
         {
@@ -1134,6 +1146,38 @@ public partial class MainWindowViewModel : ObservableObject
         EntitiesChanged?.Invoke(this, EventArgs.Empty);
         RenderRequested?.Invoke(this, EventArgs.Empty);
         StatusText = $"Moved {selectedEntities.Count} entities";
+    }
+
+    public void OnTransformCompleted(TransformCompletedEventArgs e)
+    {
+        var selectedEntities = _selectionService.SelectedEntities
+            .Where(em => !em.IsLocked)
+            .Select(em => em.Entity)
+            .ToList();
+
+        if (selectedEntities.Count == 0)
+            return;
+
+        var command = new TransformEntitiesCommand(
+            _documentService.CurrentDocument,
+            selectedEntities,
+            e.PivotX, e.PivotY,
+            e.ScaleX, e.ScaleY,
+            e.AngleRadians);
+        _undoRedoService.Execute(command);
+
+        foreach (var entity in selectedEntities)
+        {
+            BoundingBoxHelper.InvalidateEntity(entity.Handle);
+        }
+
+        EntitiesChanged?.Invoke(this, EventArgs.Empty);
+        RenderRequested?.Invoke(this, EventArgs.Empty);
+
+        bool isRotation = e.AngleRadians.HasValue;
+        StatusText = isRotation
+            ? $"Rotated {selectedEntities.Count} entities"
+            : $"Scaled {selectedEntities.Count} entities";
     }
 
     /// <summary>
