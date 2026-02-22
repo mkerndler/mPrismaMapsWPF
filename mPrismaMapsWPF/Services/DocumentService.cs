@@ -49,15 +49,27 @@ public class DocumentService : IDocumentService
     {
         string extension = Path.GetExtension(filePath).ToLowerInvariant();
 
-        if (extension == ".dxf")
+        try
         {
-            using var reader = new DxfReader(filePath);
-            return reader.Read();
+            if (extension == ".dxf")
+            {
+                using var reader = new DxfReader(filePath);
+                return reader.Read();
+            }
+            else
+            {
+                using var reader = new DwgReader(filePath);
+                return reader.Read();
+            }
         }
-        else
+        catch (Exception ex)
         {
-            using var reader = new DwgReader(filePath);
-            return reader.Read();
+            throw new InvalidOperationException(
+                $"Cannot read '{Path.GetFileName(filePath)}'. " +
+                "The file may be in an unsupported DWG version, contain duplicate object handles, " +
+                "or be corrupt. Try opening the file in your CAD application and exporting it again " +
+                "(File → Save As, choosing a DWG 2013 or DXF format)." +
+                $"\n\nACadSharp: {ex.Message}", ex);
         }
     }
 
@@ -154,17 +166,63 @@ public class DocumentService : IDocumentService
         {
             await Task.Run(() =>
             {
+                // ACadSharp's header writer looks up CurrentLayerName in the layers table.
+                // If that layer was deleted (e.g. via DeleteLayerCommand), the lookup throws
+                // KeyNotFoundException. Reset to "0" — the default layer that always exists.
+                string currentLayerName = CurrentDocument.Document.Header.CurrentLayerName;
+                if (!string.IsNullOrEmpty(currentLayerName) &&
+                    !CurrentDocument.Document.Layers.Any(l => l.Name == currentLayerName))
+                {
+                    _logger.LogWarning(
+                        "Header CurrentLayer '{LayerName}' no longer exists; resetting to '0' before save",
+                        currentLayerName);
+                    CurrentDocument.Document.Header.CurrentLayerName = "0";
+                }
+
                 string extension = Path.GetExtension(targetPath).ToLowerInvariant();
 
-                if (extension == ".dxf")
+                // Write to a temp file first so that a failed write never corrupts
+                // (or replaces) the original file.  Move to the real path on success.
+                string tempPath = targetPath + ".tmp";
+                try
                 {
-                    using var writer = new DxfWriter(targetPath, CurrentDocument.Document, false);
-                    writer.Write();
+                    if (extension == ".dxf")
+                    {
+                        using var writer = new DxfWriter(tempPath, CurrentDocument.Document, false);
+                        writer.Write();
+                    }
+                    else
+                    {
+                        // ACadSharp's DwgWriter can produce duplicate object handles when
+                        // entities/layers have been removed from a loaded document, making
+                        // the output file unreadable.  Round-tripping through an in-memory
+                        // DXF forces the DXF reader to re-assign all handles cleanly before
+                        // the DwgWriter runs.
+                        // DxfWriter closes the MemoryStream on disposal, so capture the
+                        // bytes via ToArray() (which works on a disposed MemoryStream)
+                        // and feed them to a fresh stream for the DxfReader.
+                        CadDocument cleanDoc;
+                        byte[] dxfBytes;
+                        using (var ms = new MemoryStream())
+                        {
+                            using (var dxfWriter = new DxfWriter(ms, CurrentDocument.Document, false))
+                                dxfWriter.Write();
+                            dxfBytes = ms.ToArray();
+                        }
+                        using (var readMs = new MemoryStream(dxfBytes))
+                        using (var dxfReader = new DxfReader(readMs))
+                            cleanDoc = dxfReader.Read();
+                        using var dwgWriter = new DwgWriter(tempPath, cleanDoc);
+                        dwgWriter.Write();
+                    }
+
+                    File.Move(tempPath, targetPath, overwrite: true);
                 }
-                else
+                catch
                 {
-                    using var writer = new DwgWriter(targetPath, CurrentDocument.Document);
-                    writer.Write();
+                    if (File.Exists(tempPath))
+                        File.Delete(tempPath);
+                    throw;
                 }
             }, cancellationToken);
 

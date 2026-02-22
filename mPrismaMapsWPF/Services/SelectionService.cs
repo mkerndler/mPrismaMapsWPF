@@ -20,7 +20,7 @@ public class SelectionService : ISelectionService
 
         if (!addToSelection)
         {
-            foreach (var e in _selectedEntities)
+            foreach (var e in _selectedEntities.ToList())
             {
                 e.IsSelected = false;
                 removed.Add(e);
@@ -47,7 +47,7 @@ public class SelectionService : ISelectionService
 
         if (!addToSelection)
         {
-            foreach (var e in _selectedEntities)
+            foreach (var e in _selectedEntities.ToList())
             {
                 e.IsSelected = false;
                 removed.Add(e);

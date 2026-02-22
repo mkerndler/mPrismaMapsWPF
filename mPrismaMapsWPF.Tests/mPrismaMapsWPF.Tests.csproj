@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="ACadSharp" Version="3.4.9" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="FluentAssertions" Version="8.3.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />

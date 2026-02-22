@@ -48,6 +48,7 @@ public partial class App : Application
         services.AddSingleton<IWalkwayService, WalkwayService>();
         services.AddSingleton<IDeployService, DeployService>();
         services.AddSingleton<IBackupService, BackupService>();
+        services.AddSingleton<IMergeDocumentService, MergeDocumentService>();
 
         // ViewModels
         services.AddSingleton<MainWindowViewModel>();

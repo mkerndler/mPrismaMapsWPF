@@ -12,6 +12,7 @@ using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Services;
 using mPrismaMapsWPF.Controls;
+using mPrismaMapsWPF.Views;
 using WpfPoint = System.Windows.Point;
 
 namespace mPrismaMapsWPF.ViewModels;
@@ -24,6 +25,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly IWalkwayService _walkwayService;
     private readonly IDeployService _deployService;
     private readonly IBackupService _backupService;
+    private readonly IMergeDocumentService _mergeDocumentService;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly LegacyMapImportExport _legacyImportExport = new();
 
@@ -34,6 +36,7 @@ public partial class MainWindowViewModel : ObservableObject
         IWalkwayService walkwayService,
         IDeployService deployService,
         IBackupService backupService,
+        IMergeDocumentService mergeDocumentService,
         ILogger<MainWindowViewModel> logger)
     {
         _documentService = documentService;
@@ -42,6 +45,7 @@ public partial class MainWindowViewModel : ObservableObject
         _walkwayService = walkwayService;
         _deployService = deployService;
         _backupService = backupService;
+        _mergeDocumentService = mergeDocumentService;
         _logger = logger;
 
         _documentService.DocumentLoaded += OnDocumentLoaded;
@@ -284,8 +288,7 @@ public partial class MainWindowViewModel : ObservableObject
         bool success = await _documentService.SaveAsync();
 
         IsLoading = false;
-        if (!success) _logger.LogError("Save failed");
-        StatusText = success ? "Saved" : "Save failed";
+        StatusText = success ? "Saved" : "Save failed — check logs for details";
     }
 
     private bool CanSave() => _documentService.CurrentDocument.Document != null;
@@ -340,6 +343,67 @@ public partial class MainWindowViewModel : ObservableObject
             MessageBox.Show($"Failed to open legacy map:\n{ex.Message}", "Open Legacy Error",
                 MessageBoxButton.OK, MessageBoxImage.Error);
             StatusText = "Open legacy failed";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanSave))]
+    private async Task MergeDwgAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "DWG Files (*.dwg)|*.dwg|DXF Files (*.dxf)|*.dxf|All CAD Files (*.dwg;*.dxf)|*.dwg;*.dxf",
+            FilterIndex = 3,
+            Title = "Select File to Merge",
+        };
+
+        if (dialog.ShowDialog() != true)
+            return;
+
+        IsLoading = true;
+        StatusText = "Reading file to merge...";
+
+        try
+        {
+            var secondary = await Task.Run(() => _mergeDocumentService.ReadFile(dialog.FileName));
+            int entityCount = secondary.Entities.Count();
+
+            IsLoading = false;
+
+            var optionsDialog = new MergeOptionsDialog(dialog.FileName, entityCount)
+            {
+                Owner = Application.Current.MainWindow,
+            };
+
+            if (optionsDialog.ShowDialog() != true)
+                return;
+
+            IsLoading = true;
+            StatusText = "Merging...";
+
+            var command = new MergeDwgCommand(
+                _documentService.CurrentDocument,
+                secondary,
+                optionsDialog.Options,
+                _mergeDocumentService);
+
+            _undoRedoService.Execute(command);
+
+            RefreshEntities();
+            LayerPanel.RefreshLayers();
+
+            StatusText = command.ResultSummary;
+            _logger.LogInformation("Merge completed: {Summary}", command.ResultSummary);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to merge file {FileName}", dialog.FileName);
+            StatusText = "Merge failed";
+            MessageBox.Show($"Failed to merge file:\n{ex.Message}", "Merge Error",
+                MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -532,18 +596,22 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void RotateView(double angle)
+    private void RotateView(object? parameter)
     {
+        if (!double.TryParse(parameter?.ToString(), out double angle))
+            return;
         ViewRotation = angle;
-        StatusText = $"View rotated to {angle}";
+        StatusText = $"View rotated to {angle}°";
     }
 
     [RelayCommand]
-    private void RotateViewBy(double delta)
+    private void RotateViewBy(object? parameter)
     {
+        if (!double.TryParse(parameter?.ToString(), out double delta))
+            return;
         ViewRotation = (ViewRotation + delta) % 360;
         if (ViewRotation < 0) ViewRotation += 360;
-        StatusText = $"View rotated to {ViewRotation}";
+        StatusText = $"View rotated to {ViewRotation:F1}°";
     }
 
     [RelayCommand]

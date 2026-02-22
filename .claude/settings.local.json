@@ -24,7 +24,16 @@
       "Bash(chmod:*)",
       "Bash(dotnet build:*)",
       "Bash(grep:*)",
-      "Bash(dotnet run:*)"
+      "Bash(dotnet run:*)",
+      "Bash(dotnet tool:*)",
+      "Bash(head:*)",
+      "Bash(ilspycmd:*)",
+      "Bash(find:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:www.nuget.org)",
+      "Bash(cd /f/Programming/CSharp/mPrismaMapsWPF && dotnet add mPrismaMapsWPF/mPrismaMapsWPF.csproj package ACadSharp --version 3.4.9 2>&1)"
     ]
   }
 }

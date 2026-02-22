@@ -151,6 +151,8 @@
                 <MenuItem Header="_Save" Command="{Binding SaveFileCommand}" InputGestureText="Ctrl+S"/>
                 <MenuItem Header="Save _As..." Command="{Binding SaveFileAsCommand}"/>
                 <Separator/>
+                <MenuItem Header="_Merge DWG/DXF..." Command="{Binding MergeDwgCommand}"/>
+                <Separator/>
                 <MenuItem Header="Open Le_gacy..." Command="{Binding OpenLegacyCommand}"/>
                 <MenuItem Header="Save _Legacy..." Command="{Binding SaveLegacyCommand}"/>
                 <Separator/>
