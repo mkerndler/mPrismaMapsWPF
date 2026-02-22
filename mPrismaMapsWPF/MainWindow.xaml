@@ -81,6 +81,14 @@
             </Setter>
         </Style>
 
+        <!-- Suppress the well-known WPF binding noise where the default MenuItem
+             template tries RelativeSource FindAncestor for HorizontalContentAlignment /
+             VerticalContentAlignment before the visual tree is fully connected. -->
+        <Style TargetType="{x:Type MenuItem}">
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
         <Style x:Key="PanelHeaderStyle" TargetType="TextBlock">
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="FontSize" Value="12"/>
