@@ -284,7 +284,7 @@ public class CadCanvas : FrameworkElement
     public double Scale
     {
         get => _scale;
-        set { _scale = Math.Max(0.001, Math.Min(1000, value)); InvalidateCache(); Render(); }
+        set { _scale = Math.Max(0.001, Math.Min(1000, value)); InvalidateCache(); Render(); UpdatePreviewVisual(); }
     }
 
     public void ZoomToFit()
@@ -300,6 +300,7 @@ public class CadCanvas : FrameworkElement
                                 extents.CenterY + (ActualHeight / 2) / _scale);
         InvalidateCache();
         Render();
+        UpdatePreviewVisual();
     }
 
     public void CenterOnOrigin()
@@ -308,6 +309,7 @@ public class CadCanvas : FrameworkElement
         _offset = new WpfPoint((ActualWidth / 2) / _scale, (ActualHeight / 2) / _scale);
         InvalidateCache();
         Render();
+        UpdatePreviewVisual();
     }
 
     public void ResetViewTransforms() { FlipX = false; FlipY = false; ViewRotation = 0; }
@@ -333,6 +335,7 @@ public class CadCanvas : FrameworkElement
                                 (minY + maxY) / 2 + (ActualHeight / 2) / _scale);
         InvalidateCache();
         Render();
+        UpdatePreviewVisual();
     }
 
     public WpfPoint ScreenToCad(WpfPoint screenPoint) =>
@@ -978,6 +981,7 @@ public class CadCanvas : FrameworkElement
         // With InvalidateVisual() coalescing, rapid scroll events trigger only one rebuild.
         InvalidateCache();
         Render();
+        UpdatePreviewVisual();
     }
 
     private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -1114,6 +1118,7 @@ public class CadCanvas : FrameworkElement
                 _offset.Y + (screenPoint.Y - _panStart.Y) / _scale);
             _panStart = screenPoint;
             Render(); // entity layer (fast pan path — bitmap blit only)
+            UpdatePreviewVisual();
         }
 
         if (_isMarqueeSelecting) { _marqueeCurrentScreen = screenPoint; UpdatePreviewVisual(); }
@@ -1151,7 +1156,7 @@ public class CadCanvas : FrameworkElement
         }
     }
 
-    private void OnSizeChanged(object sender, SizeChangedEventArgs e) { InvalidateCache(); Render(); }
+    private void OnSizeChanged(object sender, SizeChangedEventArgs e) { InvalidateCache(); Render(); UpdatePreviewVisual(); }
 
     // ── Selection / move completion ──────────────────────────────────────────
 
@@ -1262,6 +1267,7 @@ public class CadCanvas : FrameworkElement
         Cursor = IsPanMode ? Cursors.Hand : Cursors.Arrow;
         InvalidateCache();
         Render();
+        UpdatePreviewVisual();
     }
 
     private bool IsEntityLocked(Entity e) =>

@@ -309,6 +309,12 @@
                               ToolTip="Pan Mode (P)">
                     <TextBlock Text="&#xF0BB4;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
+                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
+                              IsChecked="{Binding IsTransformMode, Mode=OneWay}"
+                              Command="{Binding SetTransformModeCommand}"
+                              ToolTip="Transform - Resize/Rotate (T)">
+                    <TextBlock Text="&#xF0464;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
+                </ToggleButton>
                 <Separator Margin="8,4"/>
                 <!-- Drawing Tools -->
                 <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
@@ -373,13 +379,6 @@
                               Command="{Binding SetDrawFairwayModeCommand}"
                               ToolTip="Draw Fairway (F)">
                     <TextBlock Text="&#xF0583;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
-                </ToggleButton>
-                <!-- Transform Tool -->
-                <ToggleButton Style="{StaticResource ToggleToolbarButtonStyle}"
-                              IsChecked="{Binding IsTransformMode, Mode=OneWay}"
-                              Command="{Binding SetTransformModeCommand}"
-                              ToolTip="Transform - Resize/Rotate (T)">
-                    <TextBlock Text="&#xF0464;" FontFamily="{StaticResource MaterialIcons}" FontSize="16"/>
                 </ToggleButton>
                 <Button Style="{StaticResource ToolbarButtonStyle}"
                         Command="{Binding GenerateUnitAreasCommand}"

@@ -142,7 +142,7 @@ public partial class MainWindowViewModel : ObservableObject
     private GridSnapSettings _gridSettings = new();
 
     [ObservableProperty]
-    private bool _isSnapEnabled = true;
+    private bool _isSnapEnabled = false;
 
     [ObservableProperty]
     private bool _isGridVisible = true;
