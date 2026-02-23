@@ -124,6 +124,21 @@ public class CadCanvas : FrameworkElement
         MouseMove += OnMouseMove;
         SizeChanged += OnSizeChanged;
         KeyDown += OnKeyDown;
+        Unloaded += OnUnloaded;
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        MouseWheel -= OnMouseWheel;
+        MouseLeftButtonDown -= OnMouseLeftButtonDown;
+        MouseLeftButtonUp -= OnMouseLeftButtonUp;
+        MouseRightButtonDown -= OnMouseRightButtonDown;
+        MouseRightButtonUp -= OnMouseRightButtonUp;
+        MouseMove -= OnMouseMove;
+        SizeChanged -= OnSizeChanged;
+        KeyDown -= OnKeyDown;
+        Unloaded -= OnUnloaded;
+        GridSettings?.PropertyChanged -= OnGridSettingsPropertyChanged;
     }
 
     protected override int VisualChildrenCount => _visuals.Count;

@@ -42,14 +42,22 @@ public class MergeDwgCommand : IUndoableCommand
         if (_document.Document == null)
             return;
 
-        var result = _mergeService.Merge(_document.Document, _secondary, _options);
+        try
+        {
+            var result = _mergeService.Merge(_document.Document, _secondary, _options);
 
-        _addedEntities  = result.AddedEntities;
-        _addedLayers    = result.AddedLayers;
-        _addedBlocks    = result.AddedBlocks;
-        _updatedLayers  = result.UpdatedLayers;
+            _addedEntities  = result.AddedEntities;
+            _addedLayers    = result.AddedLayers;
+            _addedBlocks    = result.AddedBlocks;
+            _updatedLayers  = result.UpdatedLayers;
 
-        _document.IsDirty = true;
+            _document.IsDirty = true;
+        }
+        catch
+        {
+            Undo();
+            throw;
+        }
     }
 
     public void Undo()

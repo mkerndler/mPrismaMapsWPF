@@ -121,6 +121,7 @@ public class DocumentService : IDocumentService
 
             _logger.LogInformation("Opened {FilePath}: {EntityCount} entities, {LayerCount} layers", filePath, entityCount, layerCount);
 
+            BoundingBoxHelper.InvalidateCache();
             DocumentLoaded?.Invoke(this, new DocumentLoadedEventArgs(filePath, entityCount, layerCount));
 
             return true;
@@ -150,6 +151,7 @@ public class DocumentService : IDocumentService
             "Loaded imported document from {DisplayPath}: {EntityCount} entities, {LayerCount} layers",
             displayPath, entityCount, layerCount);
 
+        BoundingBoxHelper.InvalidateCache();
         DocumentLoaded?.Invoke(this, new DocumentLoadedEventArgs(displayPath, entityCount, layerCount));
     }
 
@@ -242,6 +244,7 @@ public class DocumentService : IDocumentService
         _logger.LogInformation("Closing document");
         CurrentDocument.Clear();
         SkiaRenderCache.Clear();
+        BoundingBoxHelper.InvalidateCache();
         DocumentClosed?.Invoke(this, EventArgs.Empty);
     }
 }

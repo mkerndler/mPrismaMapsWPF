@@ -83,8 +83,10 @@
 
         <!-- Suppress the well-known WPF binding noise where the default MenuItem
              template tries RelativeSource FindAncestor for HorizontalContentAlignment /
-             VerticalContentAlignment before the visual tree is fully connected. -->
-        <Style TargetType="{x:Type MenuItem}">
+             VerticalContentAlignment before the visual tree is fully connected.
+             BasedOn preserves the dark theme's implicit style so the local setters
+             are merged on top rather than replacing the entire dark style. -->
+        <Style TargetType="{x:Type MenuItem}" BasedOn="{StaticResource {x:Type MenuItem}}">
             <Setter Property="HorizontalContentAlignment" Value="Left"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>

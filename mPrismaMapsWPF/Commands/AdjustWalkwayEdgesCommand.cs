@@ -1,5 +1,6 @@
 using ACadSharp.Entities;
 using CSMath;
+using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Services;
 
 namespace mPrismaMapsWPF.Commands;
@@ -10,6 +11,7 @@ namespace mPrismaMapsWPF.Commands;
 /// </summary>
 public class AdjustWalkwayEdgesCommand : IUndoableCommand
 {
+    private readonly CadDocumentModel _document;
     private readonly List<(Line line, bool adjustStart, bool adjustEnd)> _adjustments;
     private readonly double _dx;
     private readonly double _dy;
@@ -17,9 +19,11 @@ public class AdjustWalkwayEdgesCommand : IUndoableCommand
     public string Description => "Adjust walkway edges";
 
     public AdjustWalkwayEdgesCommand(
+        CadDocumentModel document,
         List<(Line line, bool adjustStart, bool adjustEnd)> adjustments,
         double dx, double dy)
     {
+        _document = document;
         _adjustments = adjustments;
         _dx = dx;
         _dy = dy;
@@ -45,6 +49,7 @@ public class AdjustWalkwayEdgesCommand : IUndoableCommand
                     line.EndPoint.Z);
             }
         }
+        _document.IsDirty = true;
     }
 
     public void Undo()
@@ -67,5 +72,6 @@ public class AdjustWalkwayEdgesCommand : IUndoableCommand
                     line.EndPoint.Z);
             }
         }
+        _document.IsDirty = true;
     }
 }

@@ -25,7 +25,7 @@ public class PasteEntitiesCommand : IUndoableCommand
     public void Execute()
     {
         if (_document.Document == null)
-            return;
+            throw new InvalidOperationException("Cannot paste: no document is loaded.");
 
         _owner = _document.Document.ModelSpace;
         foreach (var entity in _entities)

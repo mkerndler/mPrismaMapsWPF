@@ -64,6 +64,18 @@ public class PolylineToolTests
     }
 
     [Fact]
+    public void Enter_WithOnePoint_FiresCancelled()
+    {
+        bool cancelled = false;
+        _tool.Cancelled += (_, _) => cancelled = true;
+
+        _tool.OnMouseDown(new Point(0, 0), MouseButton.Left);
+        _tool.OnKeyDown(Key.Enter);
+
+        cancelled.Should().BeTrue();
+    }
+
+    [Fact]
     public void Escape_CancelsDrawing()
     {
         bool cancelled = false;

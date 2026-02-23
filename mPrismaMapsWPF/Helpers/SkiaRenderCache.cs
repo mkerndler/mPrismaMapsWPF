@@ -1,42 +1,37 @@
+using System.Collections.Concurrent;
 using SkiaSharp;
 
 namespace mPrismaMapsWPF.Helpers;
 
 public static class SkiaRenderCache
 {
-    private static readonly Dictionary<(uint, float), SKPaint> _strokeCache = new();
-    private static readonly Dictionary<uint, SKPaint> _fillCache = new();
+    private static readonly ConcurrentDictionary<(uint, float), SKPaint> _strokeCache = new();
+    private static readonly ConcurrentDictionary<uint, SKPaint> _fillCache = new();
     private static readonly SKTypeface _typeface =
         SKTypeface.FromFamilyName("Arial") ?? SKTypeface.Default;
 
     public static SKPaint GetStrokePaint(SKColor color, float thickness)
     {
         uint key = Pack(color);
-        if (_strokeCache.TryGetValue((key, thickness), out var cached)) return cached;
-        var paint = new SKPaint
+        return _strokeCache.GetOrAdd((key, thickness), _ => new SKPaint
         {
             Style = SKPaintStyle.Stroke,
             Color = color,
             StrokeWidth = thickness,
             IsAntialias = true,
             StrokeCap = SKStrokeCap.Round
-        };
-        _strokeCache[(key, thickness)] = paint;
-        return paint;
+        });
     }
 
     public static SKPaint GetFillPaint(SKColor color)
     {
         uint key = Pack(color);
-        if (_fillCache.TryGetValue(key, out var cached)) return cached;
-        var paint = new SKPaint
+        return _fillCache.GetOrAdd(key, _ => new SKPaint
         {
             Style = SKPaintStyle.Fill,
             Color = color,
             IsAntialias = true
-        };
-        _fillCache[key] = paint;
-        return paint;
+        });
     }
 
     // SKFont is lightweight — create per call, caller disposes
@@ -45,10 +40,13 @@ public static class SkiaRenderCache
 
     public static void Clear()
     {
-        foreach (var p in _strokeCache.Values) p.Dispose();
+        var strokePaints = _strokeCache.Values.ToList();
         _strokeCache.Clear();
-        foreach (var p in _fillCache.Values) p.Dispose();
+        foreach (var p in strokePaints) p.Dispose();
+
+        var fillPaints = _fillCache.Values.ToList();
         _fillCache.Clear();
+        foreach (var p in fillPaints) p.Dispose();
     }
 
     private static uint Pack(SKColor c)

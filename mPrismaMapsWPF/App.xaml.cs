@@ -75,6 +75,7 @@ public partial class App : Application
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         Log.Fatal(e.Exception, "Unhandled UI thread exception");
+        Log.CloseAndFlush();
     }
 
     private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
@@ -86,5 +87,6 @@ public partial class App : Application
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
         Log.Error(e.Exception, "Unobserved task exception");
+        Log.CloseAndFlush();
     }
 }

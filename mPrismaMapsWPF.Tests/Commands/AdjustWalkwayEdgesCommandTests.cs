@@ -7,13 +7,20 @@ namespace mPrismaMapsWPF.Tests.Commands;
 
 public class AdjustWalkwayEdgesCommandTests
 {
+    private static AdjustWalkwayEdgesCommand MakeCommand(
+        List<(Line, bool, bool)> adjustments, double dx, double dy)
+    {
+        var doc = EntityFactory.CreateDocumentModel();
+        return new AdjustWalkwayEdgesCommand(doc, adjustments, dx, dy);
+    }
+
     [Fact]
     public void Execute_AdjustsStartPoint()
     {
         var line = EntityFactory.CreateLine(0, 0, 10, 10);
         var adjustments = new List<(Line, bool, bool)> { (line, true, false) };
 
-        var cmd = new AdjustWalkwayEdgesCommand(adjustments, 5, 3);
+        var cmd = MakeCommand(adjustments, 5, 3);
         cmd.Execute();
 
         line.StartPoint.X.Should().Be(5);
@@ -28,7 +35,7 @@ public class AdjustWalkwayEdgesCommandTests
         var line = EntityFactory.CreateLine(0, 0, 10, 10);
         var adjustments = new List<(Line, bool, bool)> { (line, false, true) };
 
-        var cmd = new AdjustWalkwayEdgesCommand(adjustments, 5, 3);
+        var cmd = MakeCommand(adjustments, 5, 3);
         cmd.Execute();
 
         line.StartPoint.X.Should().Be(0); // unchanged
@@ -43,7 +50,7 @@ public class AdjustWalkwayEdgesCommandTests
         var line = EntityFactory.CreateLine(0, 0, 10, 10);
         var adjustments = new List<(Line, bool, bool)> { (line, true, true) };
 
-        var cmd = new AdjustWalkwayEdgesCommand(adjustments, 5, 3);
+        var cmd = MakeCommand(adjustments, 5, 3);
         cmd.Execute();
 
         line.StartPoint.X.Should().Be(5);
@@ -58,7 +65,7 @@ public class AdjustWalkwayEdgesCommandTests
         var line = EntityFactory.CreateLine(0, 0, 10, 10);
         var adjustments = new List<(Line, bool, bool)> { (line, true, true) };
 
-        var cmd = new AdjustWalkwayEdgesCommand(adjustments, 5, 3);
+        var cmd = MakeCommand(adjustments, 5, 3);
         cmd.Execute();
         cmd.Undo();
 

@@ -169,8 +169,10 @@ public class WalkwayGraph
         // Reconstruct path
         var path = new List<ulong>();
         var step = nearestEntrance.Value;
+        var pathVisited = new HashSet<ulong>();
         while (step != fromNodeHandle)
         {
+            if (!pathVisited.Add(step)) break; // defensive cycle guard
             path.Add(step);
             if (!prev.ContainsKey(step))
                 return null;

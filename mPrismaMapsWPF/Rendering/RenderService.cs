@@ -79,5 +79,7 @@ public class RenderService
                 return;
             }
         }
+        Serilog.Log.Debug("No renderer for entity type {Type} (handle {Handle})",
+            entity.GetType().Name, entity.Handle);
     }
 }

@@ -72,6 +72,7 @@ public static class EntityTransformHelper
                 // Unsupported entity type - no-op
                 break;
         }
+        BoundingBoxHelper.InvalidateEntity(entity.Handle);
     }
 
     // Backward-compat overload used by ScaleMapCommand (uniform scale around origin).
@@ -158,6 +159,7 @@ public static class EntityTransformHelper
                 point.Location = new XYZ(px, py, point.Location.Z);
                 break;
         }
+        BoundingBoxHelper.InvalidateEntity(entity.Handle);
     }
 
     public static void RotateEntity(Entity entity, double pivotX, double pivotY, double angleRadians)
@@ -243,6 +245,7 @@ public static class EntityTransformHelper
                 point.Location = new XYZ(px, py, point.Location.Z);
                 break;
         }
+        BoundingBoxHelper.InvalidateEntity(entity.Handle);
     }
 
     private static (double x, double y) ScalePoint(double x, double y, double pivotX, double pivotY, double scaleX, double scaleY)

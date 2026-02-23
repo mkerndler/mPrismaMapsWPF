@@ -35,6 +35,19 @@ public class PolygonToolTests
     }
 
     [Fact]
+    public void Enter_WithTwoPoints_FiresCancelled()
+    {
+        bool cancelled = false;
+        _tool.Cancelled += (_, _) => cancelled = true;
+
+        _tool.OnMouseDown(new Point(0, 0), MouseButton.Left);
+        _tool.OnMouseDown(new Point(10, 0), MouseButton.Left);
+        _tool.OnKeyDown(Key.Enter);
+
+        cancelled.Should().BeTrue();
+    }
+
+    [Fact]
     public void Enter_WithThreePoints_Completes()
     {
         DrawingCompletedEventArgs? args = null;

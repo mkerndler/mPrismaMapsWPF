@@ -55,11 +55,11 @@ public static class HitTestHelper
         double angle = Math.Atan2(dy, dx);
         if (angle < 0) angle += 2 * Math.PI;
 
-        double startAngle = arc.StartAngle;
-        double endAngle = arc.EndAngle;
+        double startAngle = arc.StartAngle * Math.PI / 180.0;
+        double endAngle   = arc.EndAngle   * Math.PI / 180.0;
 
         if (startAngle < 0) startAngle += 2 * Math.PI;
-        if (endAngle < 0) endAngle += 2 * Math.PI;
+        if (endAngle   < 0) endAngle   += 2 * Math.PI;
 
         if (endAngle < startAngle)
         {

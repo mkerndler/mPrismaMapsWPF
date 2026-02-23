@@ -53,10 +53,20 @@ public class HitTestHelperTests
     [Fact]
     public void HitTest_Arc_PointWithinAngleRange_ReturnsTrue()
     {
-        var arc = EntityFactory.CreateArc(0, 0, 10, 0, Math.PI / 2);
+        // Arc angles are in degrees (ACadSharp convention)
+        var arc = EntityFactory.CreateArc(0, 0, 10, 0, 90);
         // Point on arc at 45 degrees
         HitTestHelper.HitTest(arc, new WpfPoint(10 * Math.Cos(Math.PI / 4), 10 * Math.Sin(Math.PI / 4)), 2.0)
             .Should().BeTrue();
+    }
+
+    [Fact]
+    public void HitTest_Arc_PointOutsideAngleRange_ReturnsFalse()
+    {
+        // Arc spans 0°–90°; point at 180° should not hit
+        var arc = EntityFactory.CreateArc(0, 0, 10, 0, 90);
+        HitTestHelper.HitTest(arc, new WpfPoint(-10, 0), 2.0)
+            .Should().BeFalse();
     }
 
     [Fact]

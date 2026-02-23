@@ -102,4 +102,17 @@ public class LineToolTests
 
         cancelled.Should().BeTrue();
     }
+
+    [Fact]
+    public void ZeroLengthLine_DoesNotFireCompleted_AndResetsState()
+    {
+        DrawingCompletedEventArgs? args = null;
+        _tool.Completed += (_, e) => args = e;
+
+        _tool.OnMouseDown(new Point(5, 5), MouseButton.Left);
+        _tool.OnMouseDown(new Point(5, 5), MouseButton.Left); // same point
+
+        args.Should().BeNull();
+        _tool.IsDrawing.Should().BeFalse();
+    }
 }

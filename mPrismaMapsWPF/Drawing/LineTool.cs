@@ -41,6 +41,9 @@ public class LineTool : IDrawingTool
         {
             // Complete the line
             var snapped = ApplyAngleSnap(cadPoint);
+            if (Math.Abs(snapped.X - _startPoint.Value.X) < 1e-9
+             && Math.Abs(snapped.Y - _startPoint.Value.Y) < 1e-9)
+            { Reset(); return; }
             var points = new List<Point> { _startPoint.Value, snapped };
             Reset();
             Completed?.Invoke(this, new DrawingCompletedEventArgs(points, false, Mode));

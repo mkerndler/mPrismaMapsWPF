@@ -9,7 +9,7 @@ using mPrismaMapsWPF.Services;
 
 namespace mPrismaMapsWPF.ViewModels;
 
-public partial class PropertiesPanelViewModel : ObservableObject
+public partial class PropertiesPanelViewModel : ObservableObject, IDisposable
 {
     private readonly ISelectionService _selectionService;
     private readonly IDocumentService _documentService;
@@ -30,6 +30,11 @@ public partial class PropertiesPanelViewModel : ObservableObject
         {
             AvailableColors.Add(colorItem);
         }
+    }
+
+    public void Dispose()
+    {
+        _selectionService.SelectionChanged -= OnSelectionChanged;
     }
 
     public ObservableCollection<PropertyItem> Properties { get; } = new();

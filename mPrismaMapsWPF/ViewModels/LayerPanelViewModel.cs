@@ -8,7 +8,7 @@ using mPrismaMapsWPF.Services;
 
 namespace mPrismaMapsWPF.ViewModels;
 
-public partial class LayerPanelViewModel : ObservableObject
+public partial class LayerPanelViewModel : ObservableObject, IDisposable
 {
     private readonly IDocumentService _documentService;
     private readonly IUndoRedoService _undoRedoService;
@@ -19,6 +19,13 @@ public partial class LayerPanelViewModel : ObservableObject
         _undoRedoService = undoRedoService;
         _documentService.DocumentLoaded += OnDocumentLoaded;
         _documentService.DocumentClosed += OnDocumentClosed;
+    }
+
+    public void Dispose()
+    {
+        _documentService.DocumentLoaded -= OnDocumentLoaded;
+        _documentService.DocumentClosed -= OnDocumentClosed;
+        UnsubscribeAllLayers();
     }
 
     public ObservableCollection<LayerModel> Layers { get; } = new();
@@ -385,23 +392,30 @@ public partial class LayerPanelViewModel : ObservableObject
     /// </summary>
     public void RefreshLayers()
     {
+        UnsubscribeAllLayers();
         Layers.Clear();
         foreach (var layer in _documentService.CurrentDocument.Layers)
         {
             var layerModel = new LayerModel(layer);
-            layerModel.PropertyChanged += (s, args) =>
-            {
-                if (args.PropertyName == nameof(LayerModel.IsVisible))
-                {
-                    OnLayerVisibilityToggled(layerModel);
-                }
-                else if (args.PropertyName == nameof(LayerModel.IsLocked))
-                {
-                    OnLayerLockToggled(layerModel);
-                }
-            };
+            layerModel.PropertyChanged -= OnLayerModelPropertyChanged;
+            layerModel.PropertyChanged += OnLayerModelPropertyChanged;
             Layers.Add(layerModel);
         }
+    }
+
+    private void OnLayerModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (sender is not LayerModel layerModel) return;
+        if (e.PropertyName == nameof(LayerModel.IsVisible))
+            OnLayerVisibilityToggled(layerModel);
+        else if (e.PropertyName == nameof(LayerModel.IsLocked))
+            OnLayerLockToggled(layerModel);
+    }
+
+    private void UnsubscribeAllLayers()
+    {
+        foreach (var layer in Layers)
+            layer.PropertyChanged -= OnLayerModelPropertyChanged;
     }
 
     partial void OnSelectedLayerChanged(LayerModel? value)
@@ -411,27 +425,20 @@ public partial class LayerPanelViewModel : ObservableObject
 
     private void OnDocumentLoaded(object? sender, DocumentLoadedEventArgs e)
     {
+        UnsubscribeAllLayers();
         Layers.Clear();
         foreach (var layer in _documentService.CurrentDocument.Layers)
         {
             var layerModel = new LayerModel(layer);
-            layerModel.PropertyChanged += (s, args) =>
-            {
-                if (args.PropertyName == nameof(LayerModel.IsVisible))
-                {
-                    OnLayerVisibilityToggled(layerModel);
-                }
-                else if (args.PropertyName == nameof(LayerModel.IsLocked))
-                {
-                    OnLayerLockToggled(layerModel);
-                }
-            };
+            layerModel.PropertyChanged -= OnLayerModelPropertyChanged;
+            layerModel.PropertyChanged += OnLayerModelPropertyChanged;
             Layers.Add(layerModel);
         }
     }
 
     private void OnDocumentClosed(object? sender, EventArgs e)
     {
+        UnsubscribeAllLayers();
         Layers.Clear();
         SelectedLayers.Clear();
         SelectedLayer = null;

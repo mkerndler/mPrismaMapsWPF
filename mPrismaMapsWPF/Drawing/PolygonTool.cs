@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using mPrismaMapsWPF.Helpers;
@@ -6,10 +7,12 @@ namespace mPrismaMapsWPF.Drawing;
 
 public class PolygonTool : IDrawingTool
 {
+    [DllImport("user32.dll")] private static extern uint GetDoubleClickTime();
+    private static double DoubleClickThresholdMs => GetDoubleClickTime();
+
     private readonly List<Point> _points = new();
     private Point _currentPoint;
     private DateTime _lastClickTime = DateTime.MinValue;
-    private const double DoubleClickThresholdMs = 300;
 
     public string Name => "Polygon";
     public DrawingMode Mode => DrawingMode.DrawPolygon;
@@ -77,8 +80,7 @@ public class PolygonTool : IDrawingTool
                 Cancel();
                 break;
             case Key.Enter:
-                if (_points.Count >= 3)
-                    Complete();
+                Complete();
                 break;
             case Key.Back:
                 // Remove last point
@@ -120,7 +122,10 @@ public class PolygonTool : IDrawingTool
     private void Complete()
     {
         if (_points.Count < 3)
+        {
+            Cancel();
             return;
+        }
 
         var completedPoints = _points.ToList();
         Reset();

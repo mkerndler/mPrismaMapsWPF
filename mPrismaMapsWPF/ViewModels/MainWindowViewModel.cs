@@ -1200,7 +1200,7 @@ public partial class MainWindowViewModel : ObservableObject
         // Adjust connected edge endpoints (only the endpoint attached to a moved node)
         if (edgeAdjustments.Count > 0)
         {
-            var edgeCommand = new AdjustWalkwayEdgesCommand(edgeAdjustments, e.DeltaX, e.DeltaY);
+            var edgeCommand = new AdjustWalkwayEdgesCommand(_documentService.CurrentDocument, edgeAdjustments, e.DeltaX, e.DeltaY);
             _undoRedoService.Execute(edgeCommand);
         }
 
@@ -1431,6 +1431,8 @@ public partial class MainWindowViewModel : ObservableObject
         EntityCount = 0;
         Entities.Clear();
         _entityLookup.Clear();
+        HighlightedPathHandles = null;
+        _selectionService.ClearSelection();
         BoundingBoxHelper.InvalidateCache();
         EntityViewer.SetEntities(Entities);
 
@@ -1541,7 +1543,11 @@ public partial class MainWindowViewModel : ObservableObject
         // Get or create the User Drawings layer
         var userLayer = _documentService.CurrentDocument.GetOrCreateUserDrawingsLayer();
         if (userLayer == null)
+        {
+            _logger.LogError("Failed to get or create drawings layer");
+            StatusText = "Error: Could not create drawing layer";
             return;
+        }
 
         Entity? entity = null;
 

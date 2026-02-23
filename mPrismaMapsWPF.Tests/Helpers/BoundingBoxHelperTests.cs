@@ -1,6 +1,7 @@
 using FluentAssertions;
 using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Tests.TestHelpers;
+using System.Windows;
 
 namespace mPrismaMapsWPF.Tests.Helpers;
 
@@ -139,5 +140,27 @@ public class BoundingBoxHelperTests
         bounds.Should().NotBeNull();
         bounds!.Value.Width.Should().Be(8); // pointSize * 2
         bounds.Value.Height.Should().Be(8);
+    }
+
+    [Fact]
+    public void CacheInvalidation_AfterEntityMove_ReturnsFreshBounds()
+    {
+        BoundingBoxHelper.InvalidateCache();
+        var doc = EntityFactory.CreateDocumentModel();
+        var line = EntityFactory.CreateLine(0, 0, 10, 0);
+        doc.Document!.ModelSpace.Entities.Add(line);
+
+        var before = BoundingBoxHelper.GetBounds(line);
+        before.Should().NotBeNull();
+
+        // Move the entity — EntityTransformHelper calls InvalidateEntity automatically
+        EntityTransformHelper.TranslateEntity(line, 100, 50);
+
+        var after = BoundingBoxHelper.GetBounds(line);
+        after.Should().NotBeNull();
+
+        after!.Value.Should().NotBe(before!.Value);
+        after.Value.Left.Should().BeApproximately(100, 0.001);
+        after.Value.Top.Should().BeApproximately(50, 0.001);
     }
 }

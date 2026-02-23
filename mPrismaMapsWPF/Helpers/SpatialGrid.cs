@@ -130,9 +130,9 @@ public class SpatialGrid
 
     private void GetCellRange(Rect bounds, out int minCol, out int minRow, out int maxCol, out int maxRow)
     {
-        minCol = Math.Clamp((int)((bounds.Left - _minX) / _cellWidth), 0, _cols - 1);
-        minRow = Math.Clamp((int)((bounds.Top - _minY) / _cellHeight), 0, _rows - 1);
-        maxCol = Math.Clamp((int)((bounds.Right - _minX) / _cellWidth), 0, _cols - 1);
-        maxRow = Math.Clamp((int)((bounds.Bottom - _minY) / _cellHeight), 0, _rows - 1);
+        minCol = Math.Clamp((int)Math.Floor((bounds.Left   - _minX) / _cellWidth),      0, _cols - 1);
+        minRow = Math.Clamp((int)Math.Floor((bounds.Top    - _minY) / _cellHeight),     0, _rows - 1);
+        maxCol = Math.Clamp((int)Math.Ceiling((bounds.Right  - _minX) / _cellWidth)  - 1, 0, _cols - 1);
+        maxRow = Math.Clamp((int)Math.Ceiling((bounds.Bottom - _minY) / _cellHeight) - 1, 0, _rows - 1);
     }
 }

@@ -69,8 +69,10 @@ public class TransformEntitiesCommand : IUndoableCommand
             if (_angleRadians.HasValue)
                 EntityTransformHelper.RotateEntity(entity, _pivotX, _pivotY, -_angleRadians.Value);
 
-            if (_scaleX.HasValue && _scaleY.HasValue)
-                EntityTransformHelper.ScaleEntity(entity, _pivotX, _pivotY, 1.0 / _scaleX.Value, 1.0 / _scaleY.Value);
+            if (_scaleX.HasValue && _scaleY.HasValue
+                && Math.Abs(_scaleX.Value) > 1e-6 && Math.Abs(_scaleY.Value) > 1e-6)
+                EntityTransformHelper.ScaleEntity(entity, _pivotX, _pivotY,
+                    1.0 / _scaleX.Value, 1.0 / _scaleY.Value);
         }
         _document.IsDirty = true;
     }

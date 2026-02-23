@@ -185,6 +185,56 @@ public class WalkwayGraphTests
     }
 
     [Fact]
+    public void FindPathToNearestEntrance_DisconnectedNode_ReturnsNullWithoutHanging()
+    {
+        var (doc, layer) = SetupDoc();
+        var graph = new WalkwayGraph();
+
+        // Two isolated nodes (no edges connecting them, neither is entrance)
+        var nodeA = EntityFactory.CreateCircle(0, 0, 1, layer);
+        nodeA.Color = new Color(5);
+        doc.Document!.ModelSpace.Entities.Add(nodeA);
+        var nodeB = EntityFactory.CreateCircle(100, 100, 1, layer);
+        nodeB.Color = new Color(5);
+        doc.Document!.ModelSpace.Entities.Add(nodeB);
+
+        graph.BuildFromEntities(new[]
+        {
+            new EntityModel(nodeA),
+            new EntityModel(nodeB)
+        });
+
+        // No entrance exists — must return null, not hang
+        var result = graph.FindPathToNearestEntrance(nodeA.Handle);
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void FindPathToNearestEntrance_TwoNodesNoEntrance_ReturnsNull()
+    {
+        var (doc, layer) = SetupDoc();
+        var graph = new WalkwayGraph();
+        var nodeA = EntityFactory.CreateCircle(0, 0, 1, layer);
+        nodeA.Color = new Color(5);
+        doc.Document!.ModelSpace.Entities.Add(nodeA);
+        var nodeB = EntityFactory.CreateCircle(10, 0, 1, layer);
+        nodeB.Color = new Color(5);
+        doc.Document!.ModelSpace.Entities.Add(nodeB);
+        var edge = EntityFactory.CreateLine(0, 0, 10, 0, layer);
+        doc.Document!.ModelSpace.Entities.Add(edge);
+
+        graph.BuildFromEntities(new[]
+        {
+            new EntityModel(nodeA),
+            new EntityModel(nodeB),
+            new EntityModel(edge)
+        });
+
+        // Connected but no entrance
+        graph.FindPathToNearestEntrance(nodeA.Handle).Should().BeNull();
+    }
+
+    [Fact]
     public void GetAllHandlesForPath_IncludesNodesAndEdges()
     {
         var (doc, layer) = SetupDoc();

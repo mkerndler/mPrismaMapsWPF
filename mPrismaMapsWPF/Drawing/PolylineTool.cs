@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using mPrismaMapsWPF.Helpers;
@@ -6,10 +7,12 @@ namespace mPrismaMapsWPF.Drawing;
 
 public class PolylineTool : IDrawingTool
 {
+    [DllImport("user32.dll")] private static extern uint GetDoubleClickTime();
+    private static double DoubleClickThresholdMs => GetDoubleClickTime();
+
     private readonly List<Point> _points = new();
     private Point _currentPoint;
     private DateTime _lastClickTime = DateTime.MinValue;
-    private const double DoubleClickThresholdMs = 300;
 
     public string Name => "Polyline";
     public DrawingMode Mode => DrawingMode.DrawPolyline;
@@ -76,8 +79,7 @@ public class PolylineTool : IDrawingTool
                 Cancel();
                 break;
             case Key.Enter:
-                if (_points.Count >= 2)
-                    Complete();
+                Complete();
                 break;
             case Key.Back:
                 // Remove last point
@@ -119,7 +121,10 @@ public class PolylineTool : IDrawingTool
     private void Complete()
     {
         if (_points.Count < 2)
+        {
+            Cancel();
             return;
+        }
 
         var completedPoints = _points.ToList();
         Reset();
