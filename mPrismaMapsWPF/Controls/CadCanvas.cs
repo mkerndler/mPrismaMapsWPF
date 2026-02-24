@@ -47,6 +47,7 @@ public class CadCanvas : FrameworkElement
     // Overlay cache: selection + path-highlight, transparent background.
     // Also a WriteableBitmap → GPU texture. Rebuilt only when selection/highlight changes.
     private WriteableBitmap? _overlayBitmap;
+    private WriteableBitmap? _selectionOnlyBitmap; // selection + pivot cross only (no highlights); used for move preview
     private bool _overlayValid;
     private HashSet<ulong>? _cachedSelectedHandles;
     private HashSet<ulong>? _cachedHighlightHandles;
@@ -353,8 +354,30 @@ public class CadCanvas : FrameworkElement
         UpdatePreviewVisual();
     }
 
-    public WpfPoint ScreenToCad(WpfPoint screenPoint) =>
-        new WpfPoint(screenPoint.X / _scale - _offset.X, -(screenPoint.Y / _scale - _offset.Y));
+    /// <summary>
+    /// Converts a visible-screen point (accounting for FlipX/FlipY/ViewRotation) into
+    /// the Skia pixel space that the entity cache bitmap uses.
+    /// </summary>
+    private WpfPoint VisibleToSkia(WpfPoint p)
+    {
+        double sx = _flipX ? ActualWidth  - p.X : p.X;
+        double sy = _flipY ? ActualHeight - p.Y : p.Y;
+        if (Math.Abs(_viewRotation) >= 0.001)
+        {
+            double cx = ActualWidth / 2.0, cy = ActualHeight / 2.0;
+            double rad = -_viewRotation * Math.PI / 180.0;
+            double dx = sx - cx, dy = sy - cy;
+            sx = cx + dx * Math.Cos(rad) - dy * Math.Sin(rad);
+            sy = cy + dx * Math.Sin(rad) + dy * Math.Cos(rad);
+        }
+        return new WpfPoint(sx, sy);
+    }
+
+    public WpfPoint ScreenToCad(WpfPoint screenPoint)
+    {
+        var skia = VisibleToSkia(screenPoint);
+        return new WpfPoint(skia.X / _scale - _offset.X, -(skia.Y / _scale - _offset.Y));
+    }
 
     public WpfPoint GetSnappedCadPoint(WpfPoint screenPoint)
     {
@@ -372,6 +395,7 @@ public class CadCanvas : FrameworkElement
         _cachedBitmap = null;
         _overlayValid = false;
         _overlayBitmap = null;
+        _selectionOnlyBitmap = null;
     }
 
     public Rect GetViewportBounds() => CalculateViewportBounds();
@@ -480,7 +504,9 @@ public class CadCanvas : FrameworkElement
                 DefaultColor = System.Windows.Media.Colors.White,
                 LineThickness = 1.0,
                 ShowSelection = false,
-                ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds()
+                ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds(),
+                FlipX = _flipX,
+                FlipY = _flipY
             };
             foreach (var layer in _currentHiddenLayers) rc.HiddenLayers.Add(layer);
 
@@ -506,6 +532,9 @@ public class CadCanvas : FrameworkElement
     /// </summary>
     private void RebuildOverlay(IEnumerable<Entity> entities, int w, int h)
     {
+        var viewport = _frameViewportBounds ?? CalculateViewportBounds();
+
+        // ── Build _overlayBitmap (selection + highlights + pivot cross) ────────
         if (_overlayBitmap == null || _overlayBitmap.PixelWidth != w || _overlayBitmap.PixelHeight != h)
             _overlayBitmap = new WriteableBitmap(w, h, 96, 96, PixelFormats.Pbgra32, null);
 
@@ -516,9 +545,7 @@ public class CadCanvas : FrameworkElement
             using var surface = SKSurface.Create(info, _overlayBitmap.BackBuffer, _overlayBitmap.BackBufferStride);
             surface.Canvas.Clear(SKColors.Transparent);
 
-            var viewport = _frameViewportBounds ?? CalculateViewportBounds();
-
-            // Selection overlay
+            // Selection overlay (cyan)
             if (_selectedHandlesSet.Count > 0)
             {
                 var rc = new RenderContext
@@ -526,7 +553,8 @@ public class CadCanvas : FrameworkElement
                     Scale = _scale, Offset = _offset,
                     DefaultColor = System.Windows.Media.Colors.White,
                     LineThickness = 1.0, ShowSelection = true,
-                    ViewportBounds = viewport
+                    ViewportBounds = viewport,
+                    FlipX = _flipX, FlipY = _flipY
                 };
                 foreach (var h2 in _selectedHandlesSet) rc.SelectedHandles.Add(h2);
                 foreach (var l in _currentHiddenLayers) rc.HiddenLayers.Add(l);
@@ -545,7 +573,7 @@ public class CadCanvas : FrameworkElement
                 }
             }
 
-            // Path-highlight overlay
+            // Path-highlight overlay (orange)
             var highlights = HighlightedPathHandles;
             if (highlights != null && highlights.Count > 0 && _entityByHandle != null)
             {
@@ -554,7 +582,8 @@ public class CadCanvas : FrameworkElement
                     Scale = _scale, Offset = _offset,
                     DefaultColor = System.Windows.Media.Colors.Orange,
                     LineThickness = 3.0, ShowSelection = false,
-                    ViewportBounds = viewport
+                    ViewportBounds = viewport,
+                    FlipX = _flipX, FlipY = _flipY
                 };
                 var highlighted = new List<Entity>();
                 foreach (var handle in highlights)
@@ -562,14 +591,80 @@ public class CadCanvas : FrameworkElement
                 _renderService.RenderEntities(surface.Canvas, highlighted, rc);
             }
 
+            // Unit number pivot cross (Feature 2)
+            DrawUnitNumberPivot(surface.Canvas);
+
             _overlayBitmap.AddDirtyRect(new Int32Rect(0, 0, w, h));
         }
         finally { _overlayBitmap.Unlock(); }
+
+        // ── Build _selectionOnlyBitmap (selection + pivot cross, no highlights) ─
+        // Used by RenderMovePreview so orange highlights stay stationary during drag.
+        if (_selectionOnlyBitmap == null || _selectionOnlyBitmap.PixelWidth != w || _selectionOnlyBitmap.PixelHeight != h)
+            _selectionOnlyBitmap = new WriteableBitmap(w, h, 96, 96, PixelFormats.Pbgra32, null);
+
+        _selectionOnlyBitmap.Lock();
+        try
+        {
+            var info = new SKImageInfo(w, h, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var surface = SKSurface.Create(info, _selectionOnlyBitmap.BackBuffer, _selectionOnlyBitmap.BackBufferStride);
+            surface.Canvas.Clear(SKColors.Transparent);
+
+            if (_selectedHandlesSet.Count > 0)
+            {
+                var rc = new RenderContext
+                {
+                    Scale = _scale, Offset = _offset,
+                    DefaultColor = System.Windows.Media.Colors.White,
+                    LineThickness = 1.0, ShowSelection = true,
+                    ViewportBounds = viewport,
+                    FlipX = _flipX, FlipY = _flipY
+                };
+                foreach (var h2 in _selectedHandlesSet) rc.SelectedHandles.Add(h2);
+                foreach (var l in _currentHiddenLayers) rc.HiddenLayers.Add(l);
+
+                if (_entityByHandle != null)
+                {
+                    var sel = new List<Entity>(_selectedHandlesSet.Count);
+                    foreach (var handle in _selectedHandlesSet)
+                        if (_entityByHandle.TryGetValue(handle, out var e)) sel.Add(e);
+                    _renderService.RenderEntities(surface.Canvas, sel, rc);
+                }
+                else
+                {
+                    _renderService.RenderEntities(surface.Canvas,
+                        entities.Where(e => _selectedHandlesSet.Contains(e.Handle)), rc);
+                }
+            }
+
+            DrawUnitNumberPivot(surface.Canvas);
+
+            _selectionOnlyBitmap.AddDirtyRect(new Int32Rect(0, 0, w, h));
+        }
+        finally { _selectionOnlyBitmap.Unlock(); }
 
         _overlayValid = true;
         _cachedSelectedHandles = new HashSet<ulong>(_selectedHandlesSet);
         _cachedHighlightHandles = HighlightedPathHandles != null
             ? new HashSet<ulong>(HighlightedPathHandles) : null;
+    }
+
+    /// <summary>
+    /// Draws a yellow cross at the insert point of a selected unit number MText (Feature 2).
+    /// </summary>
+    private void DrawUnitNumberPivot(SKCanvas canvas)
+    {
+        if (_selectedHandlesSet.Count != 1 || _entityByHandle == null) return;
+        var handle = _selectedHandlesSet.First();
+        if (!_entityByHandle.TryGetValue(handle, out var entity)) return;
+        if (entity is not MText mtext || mtext.Layer?.Name != Models.CadDocumentModel.UnitNumbersLayerName) return;
+
+        var screen = CadToScreen(mtext.InsertPoint.X, mtext.InsertPoint.Y);
+        float cx = (float)screen.X, cy = (float)screen.Y;
+        const float crossSize = 8f;
+        using var crossPaint = new SKPaint { Color = SKColors.Yellow, StrokeWidth = 1.5f, IsAntialias = true };
+        canvas.DrawLine(cx - crossSize, cy, cx + crossSize, cy, crossPaint);
+        canvas.DrawLine(cx, cy - crossSize, cx, cy + crossSize, crossPaint);
     }
 
     // ── WPF DrawingContext overlays (GPU-rendered) ───────────────────────────
@@ -679,7 +774,7 @@ public class CadCanvas : FrameworkElement
     /// </summary>
     private void RenderMovePreview(DrawingContext dc)
     {
-        if (!_isMoving || _selectedHandlesSet.Count == 0 || _overlayBitmap == null) return;
+        if (!_isMoving || _selectedHandlesSet.Count == 0 || _selectionOnlyBitmap == null) return;
 
         var startScreen   = CadToScreen(_moveStartCadPoint.X, _moveStartCadPoint.Y);
         var currentScreen = CadToScreen(_moveCurrentCadPoint.X, _moveCurrentCadPoint.Y);
@@ -687,9 +782,9 @@ public class CadCanvas : FrameworkElement
         double dy = currentScreen.Y - startScreen.Y;
         if (Math.Abs(dx) < 0.5 && Math.Abs(dy) < 0.5) return;
 
-        int w = _overlayBitmap.PixelWidth, h = _overlayBitmap.PixelHeight;
+        int w = _selectionOnlyBitmap.PixelWidth, h = _selectionOnlyBitmap.PixelHeight;
         dc.PushOpacity(0.5);
-        dc.DrawImage(_overlayBitmap, new Rect(dx, dy, w, h));
+        dc.DrawImage(_selectionOnlyBitmap, new Rect(dx, dy, w, h));
         dc.Pop();
     }
 
@@ -981,6 +1076,20 @@ public class CadCanvas : FrameworkElement
                 return;
             }
         }
+        // Arrow key movement: nudge selected entities by one grid step (or 1 CAD unit)
+        if (e.Key is Key.Left or Key.Right or Key.Up or Key.Down)
+        {
+            if (_selectedHandlesSet.Count > 0 && (_currentTool == null || !_currentTool.IsDrawing))
+            {
+                double step = GridSettings?.IsEnabled == true ? GridSettings.SpacingX : 1.0;
+                double adx = e.Key == Key.Left ? -step : e.Key == Key.Right ? step : 0;
+                double ady = e.Key == Key.Up   ?  step : e.Key == Key.Down  ? -step : 0;
+                MoveCompleted?.Invoke(this, new MoveCompletedEventArgs(adx, ady));
+                e.Handled = true;
+                return;
+            }
+        }
+
         if (_currentTool != null) { _currentTool.OnKeyDown(e.Key); UpdatePreviewVisual(); Render(); e.Handled = true; }
     }
 
@@ -989,9 +1098,10 @@ public class CadCanvas : FrameworkElement
 
     private void ZoomAtPoint(WpfPoint screenPoint, double factor)
     {
-        var cad = ScreenToCad(screenPoint);
+        var cad  = ScreenToCad(screenPoint);
+        var skia = VisibleToSkia(screenPoint);
         _scale = Math.Max(0.001, Math.Min(1000, _scale * factor));
-        _offset = new WpfPoint(screenPoint.X / _scale - cad.X, screenPoint.Y / _scale + cad.Y);
+        _offset = new WpfPoint(skia.X / _scale - cad.X, skia.Y / _scale + cad.Y);
         // Invalidate so the cache is rebuilt at the new scale.
         // With InvalidateVisual() coalescing, rapid scroll events trigger only one rebuild.
         InvalidateCache();

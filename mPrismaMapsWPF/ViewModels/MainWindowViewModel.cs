@@ -919,6 +919,7 @@ public partial class MainWindowViewModel : ObservableObject
         var command = new ScaleMapCommand(_documentService.CurrentDocument, args.ScaleFactor);
         _undoRedoService.Execute(command);
 
+        ZoomToFitRequested?.Invoke(this, EventArgs.Empty);
         StatusText = $"Map scaled by {args.ScaleFactor}x";
     }
 

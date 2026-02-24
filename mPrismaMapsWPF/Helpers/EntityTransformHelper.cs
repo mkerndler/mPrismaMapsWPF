@@ -118,11 +118,12 @@ public static class EntityTransformHelper
                     var (vx, vy) = ScalePoint(v.Location.X, v.Location.Y, pivotX, pivotY, scaleX, scaleY);
                     lwPolyline.Vertices[i] = new LwPolyline.Vertex(new XY(vx, vy))
                     {
-                        Bulge = v.Bulge,
-                        StartWidth = v.StartWidth,
-                        EndWidth = v.EndWidth
+                        Bulge      = v.Bulge,
+                        StartWidth = v.StartWidth * Math.Abs(scaleX),
+                        EndWidth   = v.EndWidth   * Math.Abs(scaleX),
                     };
                 }
+                lwPolyline.ConstantWidth *= Math.Abs(scaleX);
                 break;
 
             case Polyline2D polyline2D:

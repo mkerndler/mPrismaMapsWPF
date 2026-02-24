@@ -24,7 +24,7 @@ public class FairwayTool : IDrawingTool
     public string StatusText => _points.Count switch
     {
         0 => "Click to place first node",
-        _ => $"{_points.Count} node(s) - Click to add, Right-click/Escape to end segment"
+        _ => $"{_points.Count} node(s) placed · Hold Shift for 45° angle snap · Right-click/Esc to end"
     };
 
     public event EventHandler<DrawingCompletedEventArgs>? Completed;

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using ACadSharp.Entities;
+using ACadSharp.Types;
 using mPrismaMapsWPF.Models;
 
 namespace mPrismaMapsWPF.Services;
@@ -33,11 +34,19 @@ public class MpolExportService
             .Where(p => !hiddenLayers.Contains(p.Layer!.Name))
             .ToList();
 
-        // Collect background contour polylines (LwPolyline on "Background Contours" layer)
-        var backgroundContours = entities
-            .OfType<LwPolyline>()
-            .Where(p => p.Layer?.Name == CadDocumentModel.BackgroundContoursLayerName)
-            .Where(p => !hiddenLayers.Contains(p.Layer!.Name))
+        // Layers whose geometry is handled separately — everything else becomes background
+        var excludedFromBackground = new HashSet<string>
+        {
+            CadDocumentModel.UnitNumbersLayerName,
+            CadDocumentModel.UnitAreasLayerName,
+            CadDocumentModel.WalkwaysLayerName,
+        };
+
+        // Collect background geometry: all visible entities not on excluded layers
+        var backgroundEntities = entities
+            .Where(e => e.Layer != null
+                     && !excludedFromBackground.Contains(e.Layer.Name)
+                     && !hiddenLayers.Contains(e.Layer.Name))
             .ToList();
 
         // Precompute view transform (rotation + flips applied to raw CAD coords)
@@ -61,21 +70,24 @@ public class MpolExportService
 
         // Build raw units (before scaling)
         var rawUnits = new List<(string unitNumber, List<List<(double x, double y)>> polygons,
-            List<(double x, double y)> path, double pathDistance)>();
+            List<(double x, double y)> path, double pathDistance, (double x, double y) insertPoint)>();
 
         foreach (var mtext in unitNumbers)
         {
             double px = mtext.InsertPoint.X;
             double py = mtext.InsertPoint.Y;
 
-            // Find enclosing unit area via point-in-polygon
+            // Find enclosing unit area via point-in-polygon.
+            // Units with no matching area are still exported (empty polygon list) so no data is silently dropped.
             var enclosingArea = unitAreas.FirstOrDefault(poly => IsPointInPolygon(px, py, poly));
-            if (enclosingArea == null)
-                continue;
 
-            var vertices = ExtractVertices(enclosingArea)
-                .Select(v => ApplyViewTransform(v.x, v.y)).ToList();
-            var polygons = new List<List<(double x, double y)>> { vertices };
+            var polygons = new List<List<(double x, double y)>>();
+            if (enclosingArea != null)
+            {
+                var vertices = enclosingArea.Vertices
+                    .Select(v => ApplyViewTransform(v.Location.X, v.Location.Y)).ToList();
+                polygons.Add(vertices);
+            }
 
             // Find path to entrance
             List<(double x, double y)> pathCoords = new();
@@ -88,13 +100,15 @@ public class MpolExportService
                 pathDistance = pathResult.Value.distance;
             }
 
-            rawUnits.Add((mtext.Value, polygons, pathCoords, pathDistance));
+            var insertTransformed = ApplyViewTransform(px, py);
+            rawUnits.Add((mtext.Value, polygons, pathCoords, pathDistance, insertTransformed));
         }
 
-        // Collect all raw background contour vertices (with view transform applied)
-        var rawBackgrounds = backgroundContours
-            .Select(c => ExtractVertices(c)
-                .Select(v => ApplyViewTransform(v.x, v.y)).ToList())
+        // Collect all raw background vertices (with view transform applied) from all background entities
+        var rawBackgrounds = backgroundEntities
+            .Select(e => ExtractEntityPoints(e))
+            .Where(pts => pts is { Count: >= 2 })
+            .Select(pts => pts!.Select(v => ApplyViewTransform(v.x, v.y)).ToList())
             .ToList();
 
         // Compute bounding box of all geometry
@@ -109,8 +123,10 @@ public class MpolExportService
             if (y > maxY) maxY = y;
         }
 
-        foreach (var (_, polygons, path, _) in rawUnits)
+        foreach (var (_, polygons, path, _, insertPoint) in rawUnits)
         {
+            // Always include the insert point so units without polygons/paths still contribute
+            ExpandBounds(insertPoint.x, insertPoint.y);
             foreach (var poly in polygons)
                 foreach (var (x, y) in poly)
                     ExpandBounds(x, y);
@@ -141,7 +157,7 @@ public class MpolExportService
         // Build the export model
         var map = new MpolMap { Name = storeName };
 
-        foreach (var (unitNumber, polygons, path, pathDistance) in rawUnits)
+        foreach (var (unitNumber, polygons, path, pathDistance, _) in rawUnits)
         {
             var mpolUnit = new MpolUnit { UnitNumber = unitNumber };
 
@@ -174,8 +190,8 @@ public class MpolExportService
                 mpolUnit.Polygons.Add(transformedPoly);
             }
 
-            mpolUnit.Width = uMaxX - uMinX;
-            mpolUnit.Height = uMaxY - uMinY;
+            mpolUnit.Width  = uMinX <= uMaxX ? uMaxX - uMinX : 0;
+            mpolUnit.Height = uMinY <= uMaxY ? uMaxY - uMinY : 0;
             mpolUnit.IsVertical = mpolUnit.Height > mpolUnit.Width;
             mpolUnit.Area = CalculateArea(mpolUnit.Polygons.FirstOrDefault() ?? new());
 
@@ -239,9 +255,47 @@ public class MpolExportService
         File.WriteAllText(filePath, json);
     }
 
-    private static List<(double x, double y)> ExtractVertices(LwPolyline polyline)
+    private static List<(double x, double y)>? ExtractEntityPoints(Entity entity)
     {
-        return polyline.Vertices.Select(v => (v.Location.X, v.Location.Y)).ToList();
+        return entity switch
+        {
+            LwPolyline poly     => poly.Vertices.Select(v => (v.Location.X, v.Location.Y)).ToList(),
+            Polyline2D poly2d   => poly2d.Vertices.Select(v => (v.Location.X, v.Location.Y)).ToList(),
+            Line line           => [(line.StartPoint.X, line.StartPoint.Y), (line.EndPoint.X, line.EndPoint.Y)],
+            Arc arc             => SampleArc(arc),
+            Circle circle       => SampleCircle(circle),
+            _                   => null,
+        };
+    }
+
+    private static List<(double x, double y)> SampleArc(Arc arc)
+    {
+        double start = arc.StartAngle * Math.PI / 180.0;
+        double end   = arc.EndAngle   * Math.PI / 180.0;
+        if (end <= start) end += 2 * Math.PI;
+        double span = end - start;
+        int steps = Math.Max(2, (int)Math.Ceiling(span / (5.0 * Math.PI / 180.0)));
+        var pts = new List<(double, double)>(steps + 1);
+        for (int i = 0; i <= steps; i++)
+        {
+            double a = start + span * i / steps;
+            pts.Add((arc.Center.X + arc.Radius * Math.Cos(a),
+                     arc.Center.Y + arc.Radius * Math.Sin(a)));
+        }
+        return pts;
+    }
+
+    private static List<(double x, double y)> SampleCircle(Circle circle)
+    {
+        const int steps = 72; // every 5°
+        var pts = new List<(double, double)>(steps + 1);
+        for (int i = 0; i <= steps; i++)
+        {
+            double a = 2 * Math.PI * i / steps;
+            pts.Add((circle.Center.X + circle.Radius * Math.Cos(a),
+                     circle.Center.Y + circle.Radius * Math.Sin(a)));
+        }
+        return pts;
     }
 
     private static bool IsPointInPolygon(double px, double py, LwPolyline polygon)

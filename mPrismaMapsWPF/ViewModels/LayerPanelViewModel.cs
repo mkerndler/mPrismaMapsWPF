@@ -399,11 +399,13 @@ public partial class LayerPanelViewModel : ObservableObject, IDisposable
     /// </summary>
     public void RefreshLayers()
     {
+        var hiddenNames = Layers.Where(l => !l.IsVisible).Select(l => l.Name).ToHashSet();
         UnsubscribeAllLayers();
         var newLayers = _documentService.CurrentDocument.Layers
             .Select(layer =>
             {
                 var m = new LayerModel(layer);
+                m.IsVisible = !hiddenNames.Contains(layer.Name);
                 m.PropertyChanged += OnLayerModelPropertyChanged;
                 return m;
             })

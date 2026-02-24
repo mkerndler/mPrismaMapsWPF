@@ -22,6 +22,8 @@ public class RenderContext
     public HashSet<ulong> SelectedHandles { get; } = new();
     public HashSet<string> HiddenLayers { get; } = new();
     public Rect? ViewportBounds { get; set; }
+    public bool FlipX { get; set; }
+    public bool FlipY { get; set; }
 
     public WpfPoint Transform(double x, double y)
     {

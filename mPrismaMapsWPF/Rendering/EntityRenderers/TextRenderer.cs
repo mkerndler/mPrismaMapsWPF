@@ -42,6 +42,14 @@ public class TextRenderer : IEntityRenderer
         float x = (float)position.X;
         float y = (float)position.Y;
 
+        bool needFlip = renderContext.FlipX || renderContext.FlipY;
+        if (needFlip)
+        {
+            canvas.Save();
+            canvas.Scale(renderContext.FlipX ? -1f : 1f,
+                         renderContext.FlipY ? -1f : 1f, x, y);
+        }
+
         if (Math.Abs(rotDeg) > 0.01)
         {
             canvas.Save();
@@ -51,6 +59,9 @@ public class TextRenderer : IEntityRenderer
         canvas.DrawText(text.Value, x, y, font, paint);
 
         if (Math.Abs(rotDeg) > 0.01)
+            canvas.Restore();
+
+        if (needFlip)
             canvas.Restore();
     }
 
@@ -79,6 +90,14 @@ public class TextRenderer : IEntityRenderer
         float x = (float)position.X;
         float y = (float)position.Y;
 
+        bool needFlip = renderContext.FlipX || renderContext.FlipY;
+        if (needFlip)
+        {
+            canvas.Save();
+            canvas.Scale(renderContext.FlipX ? -1f : 1f,
+                         renderContext.FlipY ? -1f : 1f, x, y);
+        }
+
         if (Math.Abs(rotDeg) > 0.01)
         {
             canvas.Save();
@@ -95,6 +114,9 @@ public class TextRenderer : IEntityRenderer
         }
 
         if (Math.Abs(rotDeg) > 0.01)
+            canvas.Restore();
+
+        if (needFlip)
             canvas.Restore();
     }
 

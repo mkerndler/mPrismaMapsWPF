@@ -16,11 +16,11 @@ public partial class ResizeUnitNumbersDialog : Window
 
     private void OkButton_Click(object sender, RoutedEventArgs e)
     {
-        if (double.TryParse(HeightTextBox.Text, out double v) && v > 0)
-        {
-            NewHeight = v;
-            DialogResult = true;
-        }
+        bool ok = double.TryParse(HeightTextBox.Text,
+            System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double v)
+         || double.TryParse(HeightTextBox.Text,
+            System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.CurrentCulture, out v);
+        if (ok && v > 0) { NewHeight = v; DialogResult = true; }
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)
