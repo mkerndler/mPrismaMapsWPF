@@ -246,6 +246,9 @@
                 <MenuItem Header="_Transform (Resize/Rotate)" Command="{Binding SetTransformModeCommand}" InputGestureText="T"/>
                 <Separator/>
                 <MenuItem Header="Generate _Unit Areas" Command="{Binding GenerateUnitAreasCommand}" InputGestureText="Ctrl+Shift+U" ToolTip="Generate filled polygons for each unit number"/>
+                <MenuItem Header="Resize _Unit Numbers..."
+                          Command="{Binding ResizeUnitNumbersCommand}"
+                          ToolTip="Change the text height of all unit number labels"/>
                 <MenuItem Header="Generate _Background Contours" Command="{Binding GenerateBackgroundContoursCommand}" InputGestureText="Ctrl+Shift+B" ToolTip="Generate polygon outlines around background geometry"/>
                 <Separator/>
                 <MenuItem Header="_Delete Hidden Entities" Command="{Binding DeleteHiddenEntitiesCommand}" ToolTip="Delete all hidden/invisible entities"/>

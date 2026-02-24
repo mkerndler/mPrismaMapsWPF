@@ -158,6 +158,24 @@ public static class HitTestHelper
         return Math.Sqrt(dx * dx + dy * dy) <= tolerance * 5;
     }
 
+    /// <summary>
+    /// Returns true if (x, y) lies inside the closed LwPolyline using ray casting.
+    /// </summary>
+    public static bool IsPointInPolygon(LwPolyline polygon, double x, double y)
+    {
+        var verts = polygon.Vertices;
+        int n = verts.Count;
+        bool inside = false;
+        for (int i = 0, j = n - 1; i < n; j = i++)
+        {
+            double xi = verts[i].Location.X, yi = verts[i].Location.Y;
+            double xj = verts[j].Location.X, yj = verts[j].Location.Y;
+            if (((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi))
+                inside = !inside;
+        }
+        return inside;
+    }
+
     private static double DistanceToLineSegment(double px, double py, double x1, double y1, double x2, double y2)
     {
         double dx = x2 - x1;

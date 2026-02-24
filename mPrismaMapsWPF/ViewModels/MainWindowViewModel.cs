@@ -65,6 +65,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
+        ResizeUnitNumbersCommand.NotifyCanExecuteChanged();
         GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
     }
 
@@ -699,6 +700,40 @@ public partial class MainWindowViewModel : ObservableObject
             .OfType<MText>()
             .Any(m => m.Layer?.Name == CadDocumentModel.UnitNumbersLayerName);
     }
+
+    public event Action<double>? ResizeUnitNumbersRequested;
+
+    [RelayCommand(CanExecute = nameof(CanResizeUnitNumbers))]
+    private void ResizeUnitNumbers()
+    {
+        var unitNumbers = _documentService.CurrentDocument.ModelSpaceEntities
+            .OfType<MText>()
+            .Where(m => m.Layer?.Name == CadDocumentModel.UnitNumbersLayerName)
+            .ToList();
+
+        double suggestedHeight = unitNumbers.Count > 0 ? unitNumbers[0].Height : 2.5;
+        ResizeUnitNumbersRequested?.Invoke(suggestedHeight);
+    }
+
+    public void ApplyResizeUnitNumbers(double newHeight)
+    {
+        var unitNumbers = _documentService.CurrentDocument.ModelSpaceEntities
+            .OfType<MText>()
+            .Where(m => m.Layer?.Name == CadDocumentModel.UnitNumbersLayerName);
+
+        var command = new ResizeUnitNumbersCommand(
+            _documentService.CurrentDocument, unitNumbers, newHeight);
+        _undoRedoService.Execute(command);
+
+        RefreshEntities();
+        StatusText = $"Resized unit numbers to height {newHeight}";
+    }
+
+    private bool CanResizeUnitNumbers() =>
+        _documentService.CurrentDocument.Document != null &&
+        _documentService.CurrentDocument.ModelSpaceEntities
+            .OfType<MText>()
+            .Any(m => m.Layer?.Name == CadDocumentModel.UnitNumbersLayerName);
 
     [RelayCommand(CanExecute = nameof(CanGenerateBackgroundContours))]
     private void GenerateBackgroundContours()
@@ -1415,6 +1450,7 @@ public partial class MainWindowViewModel : ObservableObject
         DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
         DeleteEntitiesOutsideViewportCommand.NotifyCanExecuteChanged();
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
+        ResizeUnitNumbersCommand.NotifyCanExecuteChanged();
         GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
         ExportMpolCommand.NotifyCanExecuteChanged();
         DeployMpolCommand.NotifyCanExecuteChanged();
@@ -1441,6 +1477,7 @@ public partial class MainWindowViewModel : ObservableObject
         DeleteHiddenEntitiesCommand.NotifyCanExecuteChanged();
         DeleteEntitiesOutsideViewportCommand.NotifyCanExecuteChanged();
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
+        ResizeUnitNumbersCommand.NotifyCanExecuteChanged();
         GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
         ExportMpolCommand.NotifyCanExecuteChanged();
         DeployMpolCommand.NotifyCanExecuteChanged();
@@ -1466,9 +1503,25 @@ public partial class MainWindowViewModel : ObservableObject
             selectedEntities.First().Entity is MText mtext &&
             mtext.Layer?.Name == CadDocumentModel.UnitNumbersLayerName)
         {
-            var highlights = _walkwayService.GetPathHighlightsForUnit(
-                mtext.InsertPoint.X, mtext.InsertPoint.Y);
-            HighlightedPathHandles = highlights;
+            // Prefer unit area highlight over walkway path highlight
+            var area = _documentService.CurrentDocument.ModelSpaceEntities
+                .OfType<LwPolyline>()
+                .FirstOrDefault(p =>
+                    p.IsClosed &&
+                    p.Layer?.Name == CadDocumentModel.UnitAreasLayerName &&
+                    HitTestHelper.IsPointInPolygon(p, mtext.InsertPoint.X, mtext.InsertPoint.Y));
+
+            var walkwayHighlights = _walkwayService.GetPathHighlightsForUnit(mtext.InsertPoint.X, mtext.InsertPoint.Y);
+            if (area != null)
+            {
+                var combined = new HashSet<ulong>(walkwayHighlights ?? []);
+                combined.Add(area.Handle);
+                HighlightedPathHandles = combined;
+            }
+            else
+            {
+                HighlightedPathHandles = walkwayHighlights;
+            }
         }
         else
         {
@@ -1501,6 +1554,7 @@ public partial class MainWindowViewModel : ObservableObject
         EntityViewer.Refresh();
         _walkwayService.RebuildGraph(Entities);
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
+        ResizeUnitNumbersCommand.NotifyCanExecuteChanged();
         GenerateBackgroundContoursCommand.NotifyCanExecuteChanged();
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }
@@ -1645,6 +1699,7 @@ public partial class MainWindowViewModel : ObservableObject
         DrawingStatusText = $"Place Unit Number: Click to place '{UnitNumberPrefix}{UnitNextNumber.ToString("D3")}'";
 
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
+        ResizeUnitNumbersCommand.NotifyCanExecuteChanged();
         EntitiesChanged?.Invoke(this, EventArgs.Empty);
         RenderRequested?.Invoke(this, EventArgs.Empty);
     }

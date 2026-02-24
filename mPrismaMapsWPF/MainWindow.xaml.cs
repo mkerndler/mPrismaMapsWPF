@@ -58,6 +58,7 @@ public partial class MainWindow : Window
         CadCanvas.ToggleEntranceRequested += OnToggleEntranceRequested;
 
         _viewModel.EditUnitNumberRequested += OnEditUnitNumberRequested;
+        _viewModel.ResizeUnitNumbersRequested += OnResizeUnitNumbersRequested;
         _viewModel.ExportMpolRequested += OnExportMpolRequested;
         _viewModel.DeployMpolRequested += OnDeployMpolRequested;
         _viewModel.RestoreBackupRequested += OnRestoreBackupRequested;
@@ -658,6 +659,13 @@ public partial class MainWindow : Window
             e.NewValue = dialog.UnitNumberValue;
             e.Cancelled = false;
         }
+    }
+
+    private void OnResizeUnitNumbersRequested(double suggestedHeight)
+    {
+        var dialog = new ResizeUnitNumbersDialog(suggestedHeight) { Owner = this };
+        if (dialog.ShowDialog() == true)
+            _viewModel.ApplyResizeUnitNumbers(dialog.NewHeight);
     }
 
     private void OnExportMpolRequested(object? sender, ExportMpolRequestedEventArgs e)
