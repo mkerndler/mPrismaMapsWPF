@@ -3,6 +3,7 @@ using ACadSharp.Tables;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using mPrismaMapsWPF.Commands;
+using mPrismaMapsWPF.Helpers;
 using mPrismaMapsWPF.Models;
 using mPrismaMapsWPF.Services;
 
@@ -28,7 +29,7 @@ public partial class LayerPanelViewModel : ObservableObject, IDisposable
         UnsubscribeAllLayers();
     }
 
-    public ObservableCollection<LayerModel> Layers { get; } = new();
+    public BulkObservableCollection<LayerModel> Layers { get; } = new();
 
     [ObservableProperty]
     private LayerModel? _selectedLayer;
@@ -194,20 +195,26 @@ public partial class LayerPanelViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanDeleteEmptyLayers))]
     private void DeleteEmptyLayers()
     {
-        var emptyLayers = Layers
-            .Where(l => l.Name != "0")
-            .Where(l => !_documentService.CurrentDocument.ModelSpaceEntities
-                .Any(e => e.Layer?.Name == l.Name))
+        // O(E + L): build occupied-layer set in one pass, then filter layers
+        var occupiedLayers = _documentService.CurrentDocument.ModelSpaceEntities
+            .Select(e => e.Layer?.Name)
+            .Where(n => n != null)
+            .ToHashSet();
+
+        var emptyLayerModels = Layers
+            .Where(l => l.Name != "0" && !occupiedLayers.Contains(l.Name))
             .ToList();
 
-        if (emptyLayers.Count == 0) return;
+        if (emptyLayerModels.Count == 0) return;
 
-        foreach (var layerModel in emptyLayers)
+        // Single Execute → StateChanged fires once → one RefreshEntities/RebuildSpatialIndex
+        var command = new DeleteEmptyLayersCommand(
+            _documentService.CurrentDocument,
+            emptyLayerModels.Select(l => l.Layer));
+        _undoRedoService.Execute(command);
+
+        foreach (var layerModel in emptyLayerModels)
         {
-            var command = new DeleteLayerCommand(
-                _documentService.CurrentDocument, layerModel.Layer,
-                LayerDeleteOption.DeleteEntities, null);
-            _undoRedoService.Execute(command);
             Layers.Remove(layerModel);
             SelectedLayers.Remove(layerModel);
         }
@@ -216,9 +223,9 @@ public partial class LayerPanelViewModel : ObservableObject, IDisposable
         LayersChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private bool CanDeleteEmptyLayers() => _documentService.CurrentDocument.Document != null &&
-        Layers.Any(l => l.Name != "0" && !_documentService.CurrentDocument.ModelSpaceEntities
-            .Any(e => e.Layer?.Name == l.Name));
+    // CanExecute only checks that a document is open; the O(E+L) empty-layer scan
+    // runs in the method body so it is not repeated on every WPF CanExecute poll.
+    private bool CanDeleteEmptyLayers() => _documentService.CurrentDocument.Document != null;
 
     [RelayCommand(CanExecute = nameof(CanDeleteSelectedLayers))]
     private void DeleteSelectedLayers()
@@ -393,14 +400,15 @@ public partial class LayerPanelViewModel : ObservableObject, IDisposable
     public void RefreshLayers()
     {
         UnsubscribeAllLayers();
-        Layers.Clear();
-        foreach (var layer in _documentService.CurrentDocument.Layers)
-        {
-            var layerModel = new LayerModel(layer);
-            layerModel.PropertyChanged -= OnLayerModelPropertyChanged;
-            layerModel.PropertyChanged += OnLayerModelPropertyChanged;
-            Layers.Add(layerModel);
-        }
+        var newLayers = _documentService.CurrentDocument.Layers
+            .Select(layer =>
+            {
+                var m = new LayerModel(layer);
+                m.PropertyChanged += OnLayerModelPropertyChanged;
+                return m;
+            })
+            .ToList();
+        Layers.ReplaceAll(newLayers);   // single Reset notification instead of N Add notifications
     }
 
     private void OnLayerModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -425,15 +433,7 @@ public partial class LayerPanelViewModel : ObservableObject, IDisposable
 
     private void OnDocumentLoaded(object? sender, DocumentLoadedEventArgs e)
     {
-        UnsubscribeAllLayers();
-        Layers.Clear();
-        foreach (var layer in _documentService.CurrentDocument.Layers)
-        {
-            var layerModel = new LayerModel(layer);
-            layerModel.PropertyChanged -= OnLayerModelPropertyChanged;
-            layerModel.PropertyChanged += OnLayerModelPropertyChanged;
-            Layers.Add(layerModel);
-        }
+        RefreshLayers();
     }
 
     private void OnDocumentClosed(object? sender, EventArgs e)

@@ -182,7 +182,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     private List<Entity>? _clipboardEntities;
 
-    public ObservableCollection<EntityModel> Entities { get; } = new();
+    public BulkObservableCollection<EntityModel> Entities { get; } = new();
     private Dictionary<Entity, EntityModel> _entityLookup = new();
     public CadDocumentModel Document => _documentService.CurrentDocument;
 
@@ -392,9 +392,6 @@ public partial class MainWindowViewModel : ObservableObject
                 _mergeDocumentService);
 
             _undoRedoService.Execute(command);
-
-            RefreshEntities();
-            LayerPanel.RefreshLayers();
 
             StatusText = command.ResultSummary;
             _logger.LogInformation("Merge completed: {Summary}", command.ResultSummary);
@@ -655,10 +652,6 @@ public partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        // Refresh entities
-        RefreshEntities();
-        LayerPanel.RefreshLayers();
-
         // Build status message
         var parts = new List<string>();
         if (command.EntitiesOnHiddenLayers > 0)
@@ -681,9 +674,6 @@ public partial class MainWindowViewModel : ObservableObject
 
         var command = new GenerateUnitAreasCommand(_documentService.CurrentDocument, hiddenLayers);
         _undoRedoService.Execute(command);
-
-        RefreshEntities();
-        LayerPanel.RefreshLayers();
 
         if (command.FailedCount > 0)
             StatusText = $"Generated {command.GeneratedCount} unit areas ({command.FailedCount} not enclosed)";
@@ -725,7 +715,6 @@ public partial class MainWindowViewModel : ObservableObject
             _documentService.CurrentDocument, unitNumbers, newHeight);
         _undoRedoService.Execute(command);
 
-        RefreshEntities();
         StatusText = $"Resized unit numbers to height {newHeight}";
     }
 
@@ -745,9 +734,6 @@ public partial class MainWindowViewModel : ObservableObject
 
         var command = new GenerateBackgroundContoursCommand(_documentService.CurrentDocument, hiddenLayers);
         _undoRedoService.Execute(command);
-
-        RefreshEntities();
-        LayerPanel.RefreshLayers();
 
         if (command.FailedCount > 0)
             StatusText = $"Generated {command.GeneratedCount} background contours ({command.FailedCount} failed)";
@@ -916,9 +902,6 @@ public partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        // Refresh entities
-        RefreshEntities();
-
         StatusText = $"Deleted {command.DeletedCount} entities outside viewport";
     }
 
@@ -936,8 +919,6 @@ public partial class MainWindowViewModel : ObservableObject
         var command = new ScaleMapCommand(_documentService.CurrentDocument, args.ScaleFactor);
         _undoRedoService.Execute(command);
 
-        RefreshEntities();
-        LayerPanel.RefreshLayers();
         StatusText = $"Map scaled by {args.ScaleFactor}x";
     }
 
@@ -1423,11 +1404,9 @@ public partial class MainWindowViewModel : ObservableObject
         foreach (var model in models)
             _entityLookup[model.Entity] = model;
 
-        // Suppress EntityViewer refresh during bulk load
+        // Replace entire collection in one Reset notification (avoids N CollectionChanged events)
         EntityViewer.SuppressRefresh = true;
-        Entities.Clear();
-        foreach (var model in models)
-            Entities.Add(model);
+        Entities.ReplaceAll(models);
         EntityViewer.SuppressRefresh = false;
 
         // Update entity viewer
@@ -1545,9 +1524,7 @@ public partial class MainWindowViewModel : ObservableObject
             _entityLookup[model.Entity] = model;
 
         EntityViewer.SuppressRefresh = true;
-        Entities.Clear();
-        foreach (var model in models)
-            Entities.Add(model);
+        Entities.ReplaceAll(models);
         EntityViewer.SuppressRefresh = false;
 
         EntityCount = Entities.Count;

@@ -32,18 +32,28 @@ public class DeleteEntitiesOutsideViewportCommand : IUndoableCommand
 
         _deletedEntities.Clear();
 
-        // Find all entities completely outside the viewport
+        // Find all entities completely outside the viewport that have a valid owner
         var entitiesToDelete = _document.ModelSpaceEntities
-            .Where(e => IsEntityOutsideViewport(e))
+            .Where(e => e.Owner is BlockRecord && IsEntityOutsideViewport(e))
             .ToList();
 
-        foreach (var entity in entitiesToDelete)
+        if (entitiesToDelete.Count == 0)
+            return;
+
+        // Group by owner and rebuild each owner's collection from the survivors.
+        // This is O(E) rather than the O(E²) of calling Remove() per entity on a list.
+        var toDeleteByOwner = entitiesToDelete
+            .GroupBy(e => (BlockRecord)e.Owner!)
+            .ToDictionary(g => g.Key, g => g.ToHashSet());
+
+        foreach (var (owner, toDelete) in toDeleteByOwner)
         {
-            if (entity.Owner is BlockRecord owner)
-            {
-                _deletedEntities.Add((entity, owner));
-                owner.Entities.Remove(entity);
-            }
+            var toKeep = owner.Entities.Where(e => !toDelete.Contains(e)).ToList();
+            owner.Entities.Clear();
+            foreach (var e in toKeep)
+                owner.Entities.Add(e);
+            foreach (var e in toDelete)
+                _deletedEntities.Add((e, owner));
         }
 
         _document.IsDirty = true;
