@@ -90,8 +90,8 @@ public class CadCanvas : FrameworkElement
     private double _transformScaleY = 1.0;
 
     // Static WPF pens for GPU-rendered overlays
-    private static readonly Pen GridPenMinor = CreateGridPen(WpfColor.FromArgb(40, 128, 128, 128));
-    private static readonly Pen GridPenMajor = CreateGridPen(WpfColor.FromArgb(80, 128, 128, 128));
+    private static readonly Pen GridPenMinor = CreateGridPen(WpfColor.FromArgb(60, 128, 128, 128));
+    private static readonly Pen GridPenMajor = CreateGridPen(WpfColor.FromArgb(120, 128, 128, 128));
     private static readonly Pen PreviewPen = CreatePreviewPen();
 
     private static Pen CreateGridPen(WpfColor color)
@@ -432,6 +432,7 @@ public class CadCanvas : FrameworkElement
                 if (_selectedHandlesSet.Count > 0 || HighlightedPathHandles?.Count > 0)
                     dc.DrawImage(_overlayBitmap, new Rect(dx, dy, w, h));
                 RestoreViewTransform(dc);
+                RenderUnitNumberOverlay(dc);
                 return;
             }
 
@@ -455,6 +456,7 @@ public class CadCanvas : FrameworkElement
         RenderGrid(dc);
 
         RestoreViewTransform(dc);
+        RenderUnitNumberOverlay(dc);
     }
 
     // ── Synchronous preview visual ───────────────────────────────────────────
@@ -506,7 +508,8 @@ public class CadCanvas : FrameworkElement
                 ShowSelection = false,
                 ViewportBounds = _frameViewportBounds ?? CalculateViewportBounds(),
                 FlipX = _flipX,
-                FlipY = _flipY
+                FlipY = _flipY,
+                SkipUnitNumbers = true
             };
             foreach (var layer in _currentHiddenLayers) rc.HiddenLayers.Add(layer);
 
@@ -554,7 +557,8 @@ public class CadCanvas : FrameworkElement
                     DefaultColor = System.Windows.Media.Colors.White,
                     LineThickness = 1.0, ShowSelection = true,
                     ViewportBounds = viewport,
-                    FlipX = _flipX, FlipY = _flipY
+                    FlipX = _flipX, FlipY = _flipY,
+                    SkipUnitNumbers = true
                 };
                 foreach (var h2 in _selectedHandlesSet) rc.SelectedHandles.Add(h2);
                 foreach (var l in _currentHiddenLayers) rc.HiddenLayers.Add(l);
@@ -583,7 +587,8 @@ public class CadCanvas : FrameworkElement
                     DefaultColor = System.Windows.Media.Colors.Orange,
                     LineThickness = 3.0, ShowSelection = false,
                     ViewportBounds = viewport,
-                    FlipX = _flipX, FlipY = _flipY
+                    FlipX = _flipX, FlipY = _flipY,
+                    SkipUnitNumbers = true
                 };
                 var highlighted = new List<Entity>();
                 foreach (var handle in highlights)
@@ -688,6 +693,67 @@ public class CadCanvas : FrameworkElement
         dc.Pop();
     }
 
+    /// <summary>
+    /// Converts a CAD point to final screen coordinates, applying all view transforms
+    /// (scale, offset, flip, rotation) exactly as WPF would via ApplyViewTransform.
+    /// Use this when rendering in screen space (after RestoreViewTransform).
+    /// </summary>
+    private WpfPoint CadToScreenFull(double cadX, double cadY)
+    {
+        double sx = (cadX + _offset.X) * _scale;
+        double sy = (-cadY + _offset.Y) * _scale;
+        if (_flipX) sx = ActualWidth - sx;
+        if (_flipY) sy = ActualHeight - sy;
+        if (Math.Abs(_viewRotation) >= 0.001)
+        {
+            double cx = ActualWidth / 2, cy = ActualHeight / 2;
+            double rad = _viewRotation * Math.PI / 180.0;
+            double dx = sx - cx, dy = sy - cy;
+            sx = cx + dx * Math.Cos(rad) - dy * Math.Sin(rad);
+            sy = cy + dx * Math.Sin(rad) + dy * Math.Cos(rad);
+        }
+        return new WpfPoint(sx, sy);
+    }
+
+    /// <summary>
+    /// Renders unit number text directly via WPF DrawingContext in screen space so that
+    /// the text is always upright regardless of canvas flip or rotation.
+    /// Called after RestoreViewTransform so no WPF transforms are active.
+    /// </summary>
+    private void RenderUnitNumberOverlay(DrawingContext dc)
+    {
+        var entities = Entities;
+        if (entities == null) return;
+        double pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var typeface = new Typeface("Segoe UI");
+
+        foreach (var entity in entities.OfType<MText>())
+        {
+            if (entity.Layer?.Name != CadDocumentModel.UnitNumbersLayerName) continue;
+            if (_currentHiddenLayers.Contains(entity.Layer.Name)) continue;
+
+            var screenPos = CadToScreenFull(entity.InsertPoint.X, entity.InsertPoint.Y);
+            double fontSize = Math.Max(8.0, entity.Height * _scale);
+
+            bool isSelected = _selectedHandlesSet.Contains(entity.Handle);
+            var entityColor = ColorHelper.GetEntityColor(entity, System.Windows.Media.Colors.White);
+            var color = isSelected ? System.Windows.Media.Colors.Cyan : entityColor;
+            var brush = new SolidColorBrush(color);
+
+            string cleanText = StripMTextFormattingSimple(entity.Value);
+            var ft = new FormattedText(cleanText, CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight, typeface, fontSize, brush, pixelsPerDip);
+            dc.DrawText(ft, new WpfPoint(screenPos.X, screenPos.Y - ft.Baseline));
+        }
+    }
+
+    private static string StripMTextFormattingSimple(string value)
+    {
+        var r = System.Text.RegularExpressions.Regex.Replace(value, @"\\[A-Za-z][^;]*;", "");
+        r = System.Text.RegularExpressions.Regex.Replace(r, @"\{|\}", "");
+        return r.Replace("\\P", "\n").Replace("%%c", "Ø").Replace("%%d", "°").Replace("%%p", "±");
+    }
+
     private void RenderGrid(DrawingContext dc)
     {
         if (GridSettings == null || !GridSettings.ShowGrid) return;
@@ -695,21 +761,29 @@ public class CadCanvas : FrameworkElement
         var viewport = _frameViewportBounds ?? CalculateViewportBounds();
         double spacingX = GridSettings.SpacingX, spacingY = GridSettings.SpacingY;
         if (spacingX <= 0 || spacingY <= 0) return;
-        if (spacingX * _scale < 5 || spacingY * _scale < 5) return;
 
-        double startX = Math.Floor((viewport.Left  - GridSettings.OriginX) / spacingX) * spacingX + GridSettings.OriginX;
-        double startY = Math.Floor((viewport.Top   - GridSettings.OriginY) / spacingY) * spacingY + GridSettings.OriginY;
+        // Adapt spacing so lines never appear closer than 15px; double until they do.
+        double effectiveSpacingX = spacingX;
+        double effectiveSpacingY = spacingY;
+        while (effectiveSpacingX * _scale < 15 && effectiveSpacingX < spacingX * 2048)
+            effectiveSpacingX *= 2;
+        while (effectiveSpacingY * _scale < 15 && effectiveSpacingY < spacingY * 2048)
+            effectiveSpacingY *= 2;
+        if (effectiveSpacingX * _scale < 5 || effectiveSpacingY * _scale < 5) return; // extreme zoom-out safety
+
+        double startX = Math.Floor((viewport.Left  - GridSettings.OriginX) / effectiveSpacingX) * effectiveSpacingX + GridSettings.OriginX;
+        double startY = Math.Floor((viewport.Top   - GridSettings.OriginY) / effectiveSpacingY) * effectiveSpacingY + GridSettings.OriginY;
         int lineCount = 0, maxLines = 200;
 
-        for (double x = startX; x <= viewport.Right && lineCount < maxLines; x += spacingX, lineCount++)
+        for (double x = startX; x <= viewport.Right && lineCount < maxLines; x += effectiveSpacingX, lineCount++)
         {
-            bool major = Math.Abs(x % (spacingX * 5)) < 0.0001;
+            bool major = Math.Abs(x % (effectiveSpacingX * 5)) < effectiveSpacingX * 0.01;
             dc.DrawLine(major ? GridPenMajor : GridPenMinor,
                 CadToScreen(x, viewport.Top), CadToScreen(x, viewport.Bottom));
         }
-        for (double y = startY; y <= viewport.Bottom && lineCount < maxLines; y += spacingY, lineCount++)
+        for (double y = startY; y <= viewport.Bottom && lineCount < maxLines; y += effectiveSpacingY, lineCount++)
         {
-            bool major = Math.Abs(y % (spacingY * 5)) < 0.0001;
+            bool major = Math.Abs(y % (effectiveSpacingY * 5)) < effectiveSpacingY * 0.01;
             dc.DrawLine(major ? GridPenMajor : GridPenMinor,
                 CadToScreen(viewport.Left, y), CadToScreen(viewport.Right, y));
         }
@@ -1166,13 +1240,15 @@ public class CadCanvas : FrameworkElement
         if (_spatialGrid != null)
         {
             foreach (var ent in _spatialGrid.Query(cadPoint, tol))
-                if (HitTestHelper.HitTest(ent, cadPoint, tol) && !IsEntityLocked(ent) && !IsWalkwayEdge(ent))
+                if (HitTestHelper.HitTest(ent, cadPoint, tol) && !IsEntityLocked(ent) && !IsWalkwayEdge(ent)
+                    && (ent.Layer == null || !_currentHiddenLayers.Contains(ent.Layer.Name)))
                 { hit = ent; break; }
         }
         else
         {
             foreach (var ent in entities)
-                if (HitTestHelper.HitTest(ent, cadPoint, tol) && !IsEntityLocked(ent) && !IsWalkwayEdge(ent))
+                if (HitTestHelper.HitTest(ent, cadPoint, tol) && !IsEntityLocked(ent) && !IsWalkwayEdge(ent)
+                    && (ent.Layer == null || !_currentHiddenLayers.Contains(ent.Layer.Name)))
                 { hit = ent; break; }
         }
 

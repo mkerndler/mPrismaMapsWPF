@@ -67,6 +67,9 @@ public class TextRenderer : IEntityRenderer
 
     private static void RenderMText(SKCanvas canvas, MText mtext, RenderContext renderContext)
     {
+        if (renderContext.SkipUnitNumbers && mtext.Layer?.Name == CadDocumentModel.UnitNumbersLayerName)
+            return;
+
         if (string.IsNullOrEmpty(mtext.Value))
             return;
 

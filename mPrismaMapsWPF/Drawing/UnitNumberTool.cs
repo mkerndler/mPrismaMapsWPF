@@ -17,10 +17,23 @@ public class UnitNumberTool : IDrawingTool
     // Numbering properties - set by ViewModel via CadCanvas.ConfigureUnitNumberTool
     public string Prefix { get; set; } = "";
     public int NextNumber { get; set; } = 1;
-    public string FormatString { get; set; } = "D3";
+    public string FormatString { get; set; } = "";
     public double TextHeight { get; set; } = 10.0;
 
-    public string CurrentText => Prefix + NextNumber.ToString(FormatString);
+    public string CurrentText
+    {
+        get
+        {
+            // If prefix is a plain integer, add it to NextNumber (e.g. prefix=620, next=1 → "621")
+            if (int.TryParse(Prefix, out int prefixNum))
+                return (prefixNum + NextNumber).ToString();
+
+            // Otherwise treat prefix as a text string and concatenate
+            return Prefix + (string.IsNullOrEmpty(FormatString)
+                ? NextNumber.ToString()
+                : NextNumber.ToString(FormatString));
+        }
+    }
 
     public event EventHandler<DrawingCompletedEventArgs>? Completed;
     public event EventHandler? Cancelled;

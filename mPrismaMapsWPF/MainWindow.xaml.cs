@@ -95,7 +95,7 @@ public partial class MainWindow : Window
             CadCanvas.ConfigureUnitNumberTool(
                 _viewModel.UnitNumberPrefix,
                 _viewModel.UnitNextNumber,
-                "D3",
+                "",
                 _viewModel.UnitTextHeight);
         }
         else if (e.PropertyName == nameof(MainWindowViewModel.HighlightedPathHandles))
@@ -110,6 +110,16 @@ public partial class MainWindow : Window
                 _viewModel.GetWalkwayNodes(),
                 _viewModel.GetWalkwaySnapDistance(),
                 _viewModel.ComputeWalkwayNodeRadius());
+        }
+        else if (e.PropertyName == nameof(MainWindowViewModel.DrawingMode) &&
+                 _viewModel.DrawingMode == Drawing.DrawingMode.PlaceUnitNumber)
+        {
+            // Seed the freshly-created tool with current ViewModel values
+            CadCanvas.ConfigureUnitNumberTool(
+                _viewModel.UnitNumberPrefix,
+                _viewModel.UnitNextNumber,
+                "",
+                _viewModel.UnitTextHeight);
         }
     }
 

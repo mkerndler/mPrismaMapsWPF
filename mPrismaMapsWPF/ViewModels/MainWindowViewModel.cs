@@ -140,7 +140,7 @@ public partial class MainWindowViewModel : ObservableObject
     private DrawingMode _drawingMode = DrawingMode.Select;
 
     [ObservableProperty]
-    private GridSnapSettings _gridSettings = new();
+    private GridSnapSettings _gridSettings = new() { IsEnabled = false };
 
     [ObservableProperty]
     private bool _isSnapEnabled = false;
@@ -545,7 +545,7 @@ public partial class MainWindowViewModel : ObservableObject
     {
         DrawingMode = DrawingMode.PlaceUnitNumber;
         UpdateModeFlags();
-        DrawingStatusText = $"Place Unit Number: Click to place '{UnitNumberPrefix}{UnitNextNumber.ToString("D3")}'";
+        DrawingStatusText = $"Place Unit Number: Click to place '{UnitNumberPrefix}{UnitNextNumber}'";
     }
 
     [RelayCommand]
@@ -1674,7 +1674,7 @@ public partial class MainWindowViewModel : ObservableObject
         LayerPanel.RefreshLayers();
 
         StatusText = $"Placed unit number '{e.Text}' on layer '{CadDocumentModel.UnitNumbersLayerName}'";
-        DrawingStatusText = $"Place Unit Number: Click to place '{UnitNumberPrefix}{UnitNextNumber.ToString("D3")}'";
+        DrawingStatusText = $"Place Unit Number: Click to place '{UnitNumberPrefix}{UnitNextNumber}'";
 
         GenerateUnitAreasCommand.NotifyCanExecuteChanged();
         ResizeUnitNumbersCommand.NotifyCanExecuteChanged();

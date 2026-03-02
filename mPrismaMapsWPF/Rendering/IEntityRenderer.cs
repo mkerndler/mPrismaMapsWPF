@@ -24,6 +24,7 @@ public class RenderContext
     public Rect? ViewportBounds { get; set; }
     public bool FlipX { get; set; }
     public bool FlipY { get; set; }
+    public bool SkipUnitNumbers { get; set; }
 
     public WpfPoint Transform(double x, double y)
     {

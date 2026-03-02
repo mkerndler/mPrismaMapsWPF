@@ -364,8 +364,8 @@
                          VerticalContentAlignment="Center"
                          Padding="2,0"
                          ToolTip="Unit number prefix"/>
-                <TextBlock Text="#:" Foreground="#FF888888" VerticalAlignment="Center" Margin="4,0,2,0" FontSize="10"/>
-                <TextBox Text="{Binding UnitNextNumber, UpdateSourceTrigger=LostFocus}"
+                <TextBlock Text="Start:" Foreground="#FF888888" VerticalAlignment="Center" Margin="4,0,2,0" FontSize="10"/>
+                <TextBox Text="{Binding UnitNextNumber, UpdateSourceTrigger=PropertyChanged}"
                          Width="40" Height="24"
                          Background="#FF3C3C3C" Foreground="White"
                          BorderBrush="#FF555555"

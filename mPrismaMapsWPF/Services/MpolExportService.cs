@@ -96,6 +96,8 @@ public class MpolExportService
             if (pathResult != null)
             {
                 pathCoords = pathResult.Value.path
+                    .AsEnumerable()
+                    .Reverse()
                     .Select(p => ApplyViewTransform(p.x, p.y)).ToList();
                 pathDistance = pathResult.Value.distance;
             }
